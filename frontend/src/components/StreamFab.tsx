@@ -1,0 +1,191 @@
+import { useState } from 'react';
+import { Flame, Loader2, Play, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { api, DomainSlug, StreamItem } from '../api';
+
+interface Props {
+  streams: StreamItem[];
+  onDistilled: (msg: string) => void;
+  onError: (msg: string) => void;
+  onRefresh: () => Promise<void>;
+}
+
+const DOMAIN_LABELS: Record<DomainSlug, string> = {
+  investing: '个人投资与决策',
+  learning: '教育学习',
+};
+
+export function StreamFab({ streams, onDistilled, onError, onRefresh }: Props) {
+  const [open, setOpen] = useState(false);
+  const [rawInput, setRawInput] = useState('');
+  const [domainHint, setDomainHint] = useState<DomainSlug>('investing');
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const inboxItems = streams.filter((s) => s.status === 'inbox');
+
+  const handleSaveStream = async () => {
+    if (rawInput.trim().length < 5) {
+      onError('请先输入至少 5 个字的 AI 对话或灵感');
+      return;
+    }
+    setBusyId('save');
+    try {
+      await api.createStream(rawInput.trim(), domainHint);
+      setRawInput('');
+      await onRefresh();
+      onDistilled('已暂存至交互流收件箱 (7天 TTL)');
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSaveAndDistill = async () => {
+    if (rawInput.trim().length < 5) {
+      onError('请先输入至少 5 个字的 AI 对话或灵感');
+      return;
+    }
+    setBusyId('distill_new');
+    try {
+      const created = await api.createStream(rawInput.trim(), domainHint);
+      const res = await api.distillStream(created.id, domainHint);
+      setRawInput('');
+      await onRefresh();
+      setOpen(false);
+      onDistilled(
+        `降维完成！提取 ${res.nodes.length} 条原子认知（压缩比 ${res.compression_ratio}:1）。已丢弃噪声：${res.discarded_noise_summary}`,
+      );
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDistillExisting = async (item: StreamItem) => {
+    setBusyId(item.id);
+    try {
+      const res = await api.distillStream(item.id, item.domain_hint);
+      await onRefresh();
+      setOpen(false);
+      onDistilled(`降维完成！提取 ${res.nodes.length} 条原子认知（压缩比 ${res.compression_ratio}:1）。`);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <>
+      {/* Floating Action Ball */}
+      <button
+        onClick={() => setOpen(true)}
+        title="打开交互流捕获与降维提炼"
+        className="fixed right-6 bottom-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-xl shadow-indigo-900/50 transition hover:scale-105 hover:from-indigo-500 hover:to-violet-400 active:scale-95"
+      >
+        <Plus className="h-6 w-6" />
+        {inboxItems.length > 0 && (
+          <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white shadow">
+            {inboxItems.length}
+          </span>
+        )}
+      </button>
+
+      {/* Expandable Capture Drawer / Popover */}
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-end justify-end bg-black/50 p-4 sm:p-6">
+          <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3.5">
+              <div className="flex items-center gap-2">
+                <Flame className="h-4 w-4 text-orange-400" />
+                <h2 className="text-sm font-semibold text-white">交互流捕获 (Stream Inbox)</h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={domainHint}
+                  onChange={(e) => setDomainHint(e.target.value as DomainSlug)}
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-xs text-slate-200"
+                >
+                  <option value="investing">个人投资与决策</option>
+                  <option value="learning">教育学习</option>
+                </select>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              <div>
+                <textarea
+                  rows={6}
+                  value={rawInput}
+                  onChange={(e) => setRawInput(e.target.value)}
+                  placeholder="粘贴你刚与 DeepSeek / AI 结束的长对话，或记下一段临时灵感..."
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs leading-relaxed text-slate-100 outline-none focus:border-indigo-500"
+                />
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={handleSaveStream}
+                    disabled={busyId !== null}
+                    className="rounded-xl border border-slate-700 px-3.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    仅暂存流
+                  </button>
+                  <button
+                    onClick={handleSaveAndDistill}
+                    disabled={busyId !== null}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                  >
+                    {busyId === 'distill_new' ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    一键降维提炼 (自动分类与去重)
+                  </button>
+                </div>
+              </div>
+
+              {inboxItems.length > 0 && (
+                <div className="space-y-2 border-t border-slate-800 pt-4">
+                  <div className="text-xs font-medium text-slate-400">
+                    待提炼缓存 ({inboxItems.length})
+                  </div>
+                  {inboxItems.map((item) => (
+                    <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs">
+                      <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
+                        <span>
+                          {DOMAIN_LABELS[item.domain_hint]} · ~{item.token_count} tokens
+                        </span>
+                        <button
+                          onClick={() => api.deleteStream(item.id).then(onRefresh)}
+                          className="text-slate-500 hover:text-rose-400"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <p className="line-clamp-2 text-slate-300">{item.raw_content}</p>
+                      <button
+                        onClick={() => handleDistillExisting(item)}
+                        disabled={busyId !== null}
+                        className="mt-2 flex items-center gap-1 text-indigo-400 hover:text-indigo-300"
+                      >
+                        {busyId === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                        执行降维提取
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
