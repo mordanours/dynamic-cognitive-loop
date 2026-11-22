@@ -20,6 +20,8 @@ def _mask_settings(settings: LLMSettings) -> dict:
             p["api_key_masked"] = "****"
         else:
             p["api_key_masked"] = ""
+        # Never return plaintext API keys over the network
+        p["api_key"] = ""
     return data
 
 

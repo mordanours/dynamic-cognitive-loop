@@ -267,7 +267,7 @@ async def evaluate_socratic_answer(
                     """
                     UPDATE crystallized_nodes
                     SET atomic_claim = ?, payload_json = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
+                    WHERE id = ? AND user_id = ?
                     """,
                     (
                         new_claim,
@@ -275,10 +275,14 @@ async def evaluate_socratic_answer(
                         if new_payload
                         else node_row["payload_json"],
                         node_id,
+                        user_id,
                     ),
                 )
                 updated_node = dict(
-                    conn.execute("SELECT * FROM crystallized_nodes WHERE id = ?", (node_id,)).fetchone()
+                    conn.execute(
+                        "SELECT * FROM crystallized_nodes WHERE id = ? AND user_id = ?",
+                        (node_id, user_id),
+                    ).fetchone()
                 )
                 export_node_markdown(updated_node)
 

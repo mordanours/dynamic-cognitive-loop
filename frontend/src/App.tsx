@@ -105,10 +105,23 @@ export function App() {
     setFolders(flds);
   }, []);
 
+  const clearSessionState = useCallback(() => {
+    setStoredToken(null);
+    setUser(null);
+    setMetrics(null);
+    setStreams([]);
+    setNodes([]);
+    setActions([]);
+    setProposals([]);
+    setDueSocraticNodes([]);
+    setFolders([]);
+    setSelectedDomain(null);
+    setSelectedSubfolder(null);
+    setBanner(null);
+  }, []);
+
   useEffect(() => {
-    setUnauthorizedHandler(() => {
-      setUser(null);
-    });
+    setUnauthorizedHandler(clearSessionState);
     const token = getStoredToken();
     if (!token) {
       setAuthChecked(true);
@@ -120,11 +133,10 @@ export function App() {
         setUser(u);
       })
       .catch(() => {
-        setStoredToken(null);
-        setUser(null);
+        clearSessionState();
       })
       .finally(() => setAuthChecked(true));
-  }, []);
+  }, [clearSessionState]);
 
   useEffect(() => {
     if (!user) return;
@@ -306,10 +318,7 @@ export function App() {
               模型设置
             </button>
             <button
-              onClick={() => {
-                setStoredToken(null);
-                setUser(null);
-              }}
+              onClick={clearSessionState}
               title={`当前用户: ${user.nickname} (点击退出)`}
               className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-400 hover:border-rose-500/40 hover:text-rose-300"
             >

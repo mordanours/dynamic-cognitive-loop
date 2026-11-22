@@ -142,8 +142,8 @@ def approve_proposal(proposal_id: str, user_id: str = "usr_default") -> dict[str
         if prop["proposal_type"] == "merge_duplicates":
             merged = json.loads(prop["proposed_node_json"])
             target_rows = conn.execute(
-                f"SELECT * FROM crystallized_nodes WHERE id IN ({placeholders})",
-                tuple(target_ids),
+                f"SELECT * FROM crystallized_nodes WHERE id IN ({placeholders}) AND user_id = ?",
+                (*target_ids, user_id),
             ).fetchall()
 
             max_weight = max([float(r["conversion_weight"]) for r in target_rows] or [0.5])
@@ -179,23 +179,26 @@ def approve_proposal(proposal_id: str, user_id: str = "usr_default") -> dict[str
 
             # Archive old duplicate nodes and migrate active actions
             conn.execute(
-                f"UPDATE crystallized_nodes SET status = 'merged', updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
-                tuple(target_ids),
+                f"UPDATE crystallized_nodes SET status = 'merged', updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders}) AND user_id = ?",
+                (*target_ids, user_id),
             )
             conn.execute(
-                f"UPDATE action_experiments SET node_id = ? WHERE node_id IN ({placeholders}) AND status IN ('active', 'proposed')",
-                (new_node_id, *target_ids),
+                f"UPDATE action_experiments SET node_id = ? WHERE node_id IN ({placeholders}) AND user_id = ? AND status IN ('active', 'proposed')",
+                (new_node_id, *target_ids, user_id),
             )
 
             new_node = dict(
-                conn.execute("SELECT * FROM crystallized_nodes WHERE id = ?", (new_node_id,)).fetchone()
+                conn.execute(
+                    "SELECT * FROM crystallized_nodes WHERE id = ? AND user_id = ?",
+                    (new_node_id, user_id),
+                ).fetchone()
             )
             export_node_markdown(new_node)
 
         elif prop["proposal_type"] == "deprecate_low_utility":
             conn.execute(
-                f"UPDATE crystallized_nodes SET status = 'deprecated', updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
-                tuple(target_ids),
+                f"UPDATE crystallized_nodes SET status = 'deprecated', updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders}) AND user_id = ?",
+                (*target_ids, user_id),
             )
 
         elif prop["proposal_type"] == "evolve_schema":
@@ -232,17 +235,19 @@ def approve_proposal(proposal_id: str, user_id: str = "usr_default") -> dict[str
                     """
                     UPDATE crystallized_nodes
                     SET schema_version = ?, payload_json = ?, needs_verification = 1, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
+                    WHERE id = ? AND user_id = ?
                     """,
                     (
                         to_version,
                         json.dumps(item["new_payload"], ensure_ascii=False),
                         item["node_id"],
+                        user_id,
                     ),
                 )
                 updated_node = dict(
                     conn.execute(
-                        "SELECT * FROM crystallized_nodes WHERE id = ?", (item["node_id"],)
+                        "SELECT * FROM crystallized_nodes WHERE id = ? AND user_id = ?",
+                        (item["node_id"], user_id),
                     ).fetchone()
                 )
                 export_node_markdown(updated_node)
