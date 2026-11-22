@@ -17,10 +17,12 @@ def export_node_markdown(
     node: dict[str, Any],
     actions: list[dict[str, Any]] | None = None,
 ) -> Path:
-    """Mirror a crystallized node into vault/<folder_path>/<id>_<title>.md."""
+    """Mirror a crystallized node into vault/<user_id>/<folder_path>/<id>_<title>.md."""
+    user_id = _safe_filename(node.get("user_id") or "usr_default")
     folder_rel = (node.get("folder_path") or node["domain_slug"]).strip("/")
     safe_parts = [_safe_filename(p) for p in folder_rel.split("/") if p.strip()]
-    domain_dir = VAULT_DIR.joinpath(*safe_parts) if safe_parts else (VAULT_DIR / node["domain_slug"])
+    base_dir = VAULT_DIR / user_id
+    domain_dir = base_dir.joinpath(*safe_parts) if safe_parts else (base_dir / node["domain_slug"])
     domain_dir.mkdir(parents=True, exist_ok=True)
 
     filename = f"{node['id']}_{_safe_filename(node.get('short_keyword') or node['title'])}.md"

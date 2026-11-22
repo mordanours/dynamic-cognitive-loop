@@ -35,7 +35,10 @@ class ArchitectScanOutput(BaseModel):
     proposals: list[ArchitectProposalDraft] = Field(default_factory=list, max_length=5)
 
 
-async def scan_domain_for_proposals(domain_slug: str) -> dict[str, Any]:
+async def scan_domain_for_proposals(
+    domain_slug: str,
+    user_id: str = "usr_default",
+) -> dict[str, Any]:
     with get_conn() as conn:
         nodes = [
             dict(r)
@@ -44,10 +47,10 @@ async def scan_domain_for_proposals(domain_slug: str) -> dict[str, Any]:
                 SELECT id, node_type, folder_path, short_keyword, title, atomic_claim,
                        payload_json, confidence, conversion_weight, status
                 FROM crystallized_nodes
-                WHERE domain_slug = ? AND status NOT IN ('merged', 'deprecated')
+                WHERE user_id = ? AND domain_slug = ? AND status NOT IN ('merged', 'deprecated')
                 ORDER BY conversion_weight DESC, created_at DESC
                 """,
-                (domain_slug,),
+                (user_id, domain_slug),
             ).fetchall()
         ]
         if len(nodes) < 2:
@@ -56,10 +59,10 @@ async def scan_domain_for_proposals(domain_slug: str) -> dict[str, Any]:
         schema_row = conn.execute(
             """
             SELECT * FROM domain_schemas
-            WHERE domain_slug = ? AND is_active = 1
+            WHERE user_id = ? AND domain_slug = ? AND is_active = 1
             ORDER BY version DESC LIMIT 1
             """,
-            (domain_slug,),
+            (user_id, domain_slug),
         ).fetchone()
         target_schema = json.loads(schema_row["json_schema"])
 
@@ -81,6 +84,7 @@ async def scan_domain_for_proposals(domain_slug: str) -> dict[str, Any]:
         user_prompt=user_prompt,
         response_model=ArchitectScanOutput,
         tier="reasoning",
+        user_id=user_id,
     )
 
     valid_ids = {n["id"] for n in nodes}
@@ -100,11 +104,12 @@ async def scan_domain_for_proposals(domain_slug: str) -> dict[str, Any]:
             conn.execute(
                 """
                 INSERT INTO architect_proposals
-                (id, domain_slug, proposal_type, target_node_ids_json, proposed_node_json, rationale, status)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                (id, user_id, domain_slug, proposal_type, target_node_ids_json, proposed_node_json, rationale, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
                 """,
                 (
                     prop_id,
+                    user_id,
                     domain_slug,
                     prop.proposal_type,
                     json.dumps(filtered_ids),
@@ -120,10 +125,11 @@ async def scan_domain_for_proposals(domain_slug: str) -> dict[str, Any]:
     return {"summary": result.summary, "created_proposals": created}
 
 
-def approve_proposal(proposal_id: str) -> dict[str, Any]:
+def approve_proposal(proposal_id: str, user_id: str = "usr_default") -> dict[str, Any]:
     with get_conn() as conn:
         prop = conn.execute(
-            "SELECT * FROM architect_proposals WHERE id = ?", (proposal_id,)
+            "SELECT * FROM architect_proposals WHERE id = ? AND user_id = ?",
+            (proposal_id, user_id),
         ).fetchone()
         if not prop:
             raise ValueError(f"未找到提案: {proposal_id}")
@@ -148,13 +154,14 @@ def approve_proposal(proposal_id: str) -> dict[str, Any]:
             conn.execute(
                 """
                 INSERT INTO crystallized_nodes
-                (id, domain_slug, schema_version, node_type, folder_path, short_keyword,
+                (id, user_id, domain_slug, schema_version, node_type, folder_path, short_keyword,
                  title, atomic_claim, payload_json, confidence, conversion_weight,
                  status, source_stream_ids, discarded_noise)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
                 """,
                 (
                     new_node_id,
+                    user_id,
                     prop["domain_slug"],
                     schema_ver,
                     merged["node_type"],
@@ -199,17 +206,18 @@ def approve_proposal(proposal_id: str) -> dict[str, Any]:
             domain_name = "个人投资与决策" if domain_slug == "investing" else "教育学习"
 
             conn.execute(
-                "UPDATE domain_schemas SET is_active = 0 WHERE domain_slug = ?",
-                (domain_slug,),
+                "UPDATE domain_schemas SET is_active = 0 WHERE user_id = ? AND domain_slug = ?",
+                (user_id, domain_slug),
             )
             conn.execute(
                 """
                 INSERT OR REPLACE INTO domain_schemas
-                (id, domain_slug, domain_name, version, mastery_tier, json_schema, rationale, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                (id, user_id, domain_slug, domain_name, version, mastery_tier, json_schema, rationale, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
                 (
-                    f"schema_{domain_slug}_v{to_version}",
+                    f"schema_{user_id}_{domain_slug}_v{to_version}",
+                    user_id,
                     domain_slug,
                     domain_name,
                     to_version,
@@ -241,7 +249,8 @@ def approve_proposal(proposal_id: str) -> dict[str, Any]:
 
             # Update user_profile domain mastery tier
             prof_row = conn.execute(
-                "SELECT profile_json FROM user_profile WHERE id = 'default'"
+                "SELECT profile_json FROM user_profile WHERE id = ?",
+                (user_id,),
             ).fetchone()
             if prof_row:
                 profile = json.loads(prof_row["profile_json"])
@@ -250,8 +259,8 @@ def approve_proposal(proposal_id: str) -> dict[str, Any]:
                 )
                 mastery["tier"] = to_version
                 conn.execute(
-                    "UPDATE user_profile SET profile_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 'default'",
-                    (json.dumps(profile, ensure_ascii=False),),
+                    "UPDATE user_profile SET profile_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (json.dumps(profile, ensure_ascii=False), user_id),
                 )
 
         conn.execute(
@@ -262,11 +271,11 @@ def approve_proposal(proposal_id: str) -> dict[str, Any]:
     return {"proposal_id": proposal_id, "status": "approved"}
 
 
-def reject_proposal(proposal_id: str) -> dict[str, Any]:
+def reject_proposal(proposal_id: str, user_id: str = "usr_default") -> dict[str, Any]:
     with get_conn() as conn:
         cur = conn.execute(
-            "UPDATE architect_proposals SET status = 'rejected' WHERE id = ? AND status = 'pending'",
-            (proposal_id,),
+            "UPDATE architect_proposals SET status = 'rejected' WHERE id = ? AND user_id = ? AND status = 'pending'",
+            (proposal_id, user_id),
         )
         if cur.rowcount == 0:
             raise ValueError("提案不存在或已处理")
@@ -278,11 +287,16 @@ class RefinedProposalOutput(BaseModel):
     merged_node: MergedNodeSpec
 
 
-async def refine_proposal(proposal_id: str, user_suggestion: str) -> dict[str, Any]:
+async def refine_proposal(
+    proposal_id: str,
+    user_suggestion: str,
+    user_id: str = "usr_default",
+) -> dict[str, Any]:
     """Re-synthesize a pending merge proposal incorporating user's intuition/suggestion."""
     with get_conn() as conn:
         prop = conn.execute(
-            "SELECT * FROM architect_proposals WHERE id = ?", (proposal_id,)
+            "SELECT * FROM architect_proposals WHERE id = ? AND user_id = ?",
+            (proposal_id, user_id),
         ).fetchone()
         if not prop:
             raise ValueError(f"未找到提案: {proposal_id}")
@@ -294,17 +308,17 @@ async def refine_proposal(proposal_id: str, user_suggestion: str) -> dict[str, A
         target_nodes = [
             dict(r)
             for r in conn.execute(
-                f"SELECT id, node_type, folder_path, short_keyword, title, atomic_claim, payload_json, conversion_weight FROM crystallized_nodes WHERE id IN ({placeholders})",
-                tuple(target_ids),
+                f"SELECT id, node_type, folder_path, short_keyword, title, atomic_claim, payload_json, conversion_weight FROM crystallized_nodes WHERE id IN ({placeholders}) AND user_id = ?",
+                (*target_ids, user_id),
             ).fetchall()
         ]
         schema_row = conn.execute(
             """
             SELECT * FROM domain_schemas
-            WHERE domain_slug = ? AND is_active = 1
+            WHERE user_id = ? AND domain_slug = ? AND is_active = 1
             ORDER BY version DESC LIMIT 1
             """,
-            (prop["domain_slug"],),
+            (user_id, prop["domain_slug"]),
         ).fetchone()
         target_schema = json.loads(schema_row["json_schema"])
 
@@ -324,6 +338,7 @@ async def refine_proposal(proposal_id: str, user_suggestion: str) -> dict[str, A
         user_prompt=user_prompt,
         response_model=RefinedProposalOutput,
         tier="reasoning",
+        user_id=user_id,
     )
     jsonschema.validate(instance=refined.merged_node.payload, schema=target_schema)
 
@@ -360,38 +375,42 @@ class SchemaMigrationOutput(BaseModel):
     migrated_nodes: list[MigratedNodeDraft]
 
 
-def get_schema_evolution_status(domain_slug: str) -> dict[str, Any]:
+def get_schema_evolution_status(
+    domain_slug: str,
+    user_id: str = "usr_default",
+) -> dict[str, Any]:
     with get_conn() as conn:
         active = conn.execute(
-            "SELECT * FROM domain_schemas WHERE domain_slug = ? AND is_active = 1 ORDER BY version DESC LIMIT 1",
-            (domain_slug,),
+            "SELECT * FROM domain_schemas WHERE user_id = ? AND domain_slug = ? AND is_active = 1 ORDER BY version DESC LIMIT 1",
+            (user_id, domain_slug),
         ).fetchone()
         cur_ver = int(active["version"]) if active else 1
         cur_schema = json.loads(active["json_schema"]) if active else {}
 
         next_seed = conn.execute(
-            "SELECT * FROM domain_schemas WHERE domain_slug = ? AND version > ? ORDER BY version ASC LIMIT 1",
-            (domain_slug, cur_ver),
+            "SELECT * FROM domain_schemas WHERE user_id = ? AND domain_slug = ? AND version > ? ORDER BY version ASC LIMIT 1",
+            (user_id, domain_slug, cur_ver),
         ).fetchone()
 
         prof_row = conn.execute(
-            "SELECT profile_json FROM user_profile WHERE id = 'default'"
+            "SELECT profile_json FROM user_profile WHERE id = ?",
+            (user_id,),
         ).fetchone()
         profile = json.loads(prof_row["profile_json"]) if prof_row else {}
         mastery = profile.get("domain_mastery", {}).get(
             domain_slug, {"tier": 1, "actions_verified": 0}
         )
         active_count = conn.execute(
-            "SELECT COUNT(*) FROM crystallized_nodes WHERE domain_slug = ? AND status = 'active'",
-            (domain_slug,),
+            "SELECT COUNT(*) FROM crystallized_nodes WHERE user_id = ? AND domain_slug = ? AND status = 'active'",
+            (user_id, domain_slug),
         ).fetchone()[0]
         socratic_count = conn.execute(
             """
             SELECT COUNT(*) FROM socratic_logs l
             JOIN crystallized_nodes n ON l.node_id = n.id
-            WHERE n.domain_slug = ?
+            WHERE n.user_id = ? AND n.domain_slug = ?
             """,
-            (domain_slug,),
+            (user_id, domain_slug),
         ).fetchone()[0]
 
     # Build suggested fields from next seed (if v1->v2) or current schema fields
@@ -441,8 +460,9 @@ async def preview_schema_evolution(
     domain_slug: str,
     custom_fields: list[CustomSchemaField] | None = None,
     evolution_goal: str = "",
+    user_id: str = "usr_default",
 ) -> dict[str, Any]:
-    status = get_schema_evolution_status(domain_slug)
+    status = get_schema_evolution_status(domain_slug, user_id=user_id)
     from_ver = status["current_version"]
     to_ver = status["next_version"]
 
@@ -459,11 +479,11 @@ async def preview_schema_evolution(
                 """
                 SELECT id, title, atomic_claim, payload_json, conversion_weight
                 FROM crystallized_nodes
-                WHERE domain_slug = ? AND status = 'active'
+                WHERE user_id = ? AND domain_slug = ? AND status = 'active'
                 ORDER BY conversion_weight DESC, created_at DESC
                 LIMIT 8
                 """,
-                (domain_slug,),
+                (user_id, domain_slug),
             ).fetchall()
         ]
 
@@ -474,10 +494,10 @@ async def preview_schema_evolution(
             SELECT l.node_id, l.difficulty, l.question, l.user_answer, l.rating, l.feedback, l.blind_spot_note
             FROM socratic_logs l
             JOIN crystallized_nodes n ON l.node_id = n.id
-            WHERE n.domain_slug = ?
+            WHERE n.user_id = ? AND n.domain_slug = ?
             ORDER BY l.created_at DESC
             """,
-            (domain_slug,),
+            (user_id, domain_slug),
         ).fetchall():
             socratic_by_node.setdefault(r["node_id"], []).append(dict(r))
 
@@ -488,10 +508,10 @@ async def preview_schema_evolution(
             FROM audit_logs l
             JOIN action_experiments a ON l.action_id = a.id
             JOIN crystallized_nodes n ON a.node_id = n.id
-            WHERE n.domain_slug = ?
+            WHERE n.user_id = ? AND n.domain_slug = ?
             ORDER BY l.created_at DESC
             """,
-            (domain_slug,),
+            (user_id, domain_slug),
         ).fetchall():
             audits_by_node.setdefault(r["node_id"], []).append(dict(r))
 
@@ -525,6 +545,7 @@ async def preview_schema_evolution(
             user_prompt=user_prompt,
             response_model=SchemaMigrationOutput,
             tier="reasoning",
+            user_id=user_id,
         )
         rationale = res.rationale
         node_map = {n["id"]: n for n in nodes}
@@ -556,11 +577,12 @@ async def preview_schema_evolution(
         conn.execute(
             """
             INSERT INTO architect_proposals
-            (id, domain_slug, proposal_type, target_node_ids_json, proposed_node_json, rationale, status)
-            VALUES (?, ?, 'evolve_schema', ?, ?, ?, 'pending')
+            (id, user_id, domain_slug, proposal_type, target_node_ids_json, proposed_node_json, rationale, status)
+            VALUES (?, ?, ?, 'evolve_schema', ?, ?, ?, 'pending')
             """,
             (
                 prop_id,
+                user_id,
                 domain_slug,
                 json.dumps(target_ids),
                 json.dumps(evo_payload, ensure_ascii=False),

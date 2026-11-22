@@ -47,10 +47,15 @@ class DistillationOutput(BaseModel):
     )
 
 
-async def distill_stream_item(stream_id: str, domain_slug: str | None = None) -> dict[str, Any]:
+async def distill_stream_item(
+    stream_id: str,
+    domain_slug: str | None = None,
+    user_id: str = "usr_default",
+) -> dict[str, Any]:
     with get_conn() as conn:
         stream_row = conn.execute(
-            "SELECT * FROM stream_items WHERE id = ?", (stream_id,)
+            "SELECT * FROM stream_items WHERE id = ? AND user_id = ?",
+            (stream_id, user_id),
         ).fetchone()
         if not stream_row:
             raise ValueError(f"未找到交互流记录: {stream_id}")
@@ -60,16 +65,17 @@ async def distill_stream_item(stream_id: str, domain_slug: str | None = None) ->
         schema_row = conn.execute(
             """
             SELECT * FROM domain_schemas
-            WHERE domain_slug = ? AND is_active = 1
+            WHERE user_id = ? AND domain_slug = ? AND is_active = 1
             ORDER BY version DESC LIMIT 1
             """,
-            (target_domain,),
+            (user_id, target_domain),
         ).fetchone()
         if not schema_row:
             raise ValueError(f"未找到领域 {target_domain} 的激活 Schema")
 
         profile_row = conn.execute(
-            "SELECT profile_json FROM user_profile WHERE id = 'default'"
+            "SELECT profile_json FROM user_profile WHERE id = ?",
+            (user_id,),
         ).fetchone()
         profile = json.loads(profile_row["profile_json"]) if profile_row else {}
 
@@ -78,15 +84,15 @@ async def distill_stream_item(stream_id: str, domain_slug: str | None = None) ->
             """
             SELECT folder_path, short_keyword, title, atomic_claim
             FROM crystallized_nodes
-            WHERE domain_slug = ? AND status = 'active'
+            WHERE user_id = ? AND domain_slug = ? AND status = 'active'
             ORDER BY conversion_weight DESC, created_at DESC
             LIMIT 15
             """,
-            (target_domain,),
+            (user_id, target_domain),
         ).fetchall()
         folder_rows = conn.execute(
-            "SELECT folder_name FROM domain_folders WHERE domain_slug = ? ORDER BY is_system DESC, created_at ASC",
-            (target_domain,),
+            "SELECT folder_name FROM domain_folders WHERE user_id = ? AND domain_slug = ? ORDER BY is_system DESC, created_at ASC",
+            (user_id, target_domain),
         ).fetchall()
 
     target_json_schema = json.loads(schema_row["json_schema"])
@@ -118,6 +124,7 @@ async def distill_stream_item(stream_id: str, domain_slug: str | None = None) ->
         user_prompt=user_prompt,
         response_model=DistillationOutput,
         tier="reasoning",
+        user_id=user_id,
     )
 
     for draft in result.nodes:
@@ -146,13 +153,14 @@ async def distill_stream_item(stream_id: str, domain_slug: str | None = None) ->
             conn.execute(
                 """
                 INSERT INTO crystallized_nodes
-                (id, domain_slug, schema_version, node_type, folder_path, short_keyword,
+                (id, user_id, domain_slug, schema_version, node_type, folder_path, short_keyword,
                  title, atomic_claim, payload_json, confidence, conversion_weight,
                  status, source_stream_ids, discarded_noise, compression_ratio)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
                 """,
                 (
                     node_id,
+                    user_id,
                     target_domain,
                     schema_row["version"],
                     draft.node_type,
@@ -176,8 +184,8 @@ async def distill_stream_item(stream_id: str, domain_slug: str | None = None) ->
             created_nodes.append(node_dict)
 
         conn.execute(
-            "UPDATE stream_items SET status = 'crystallized' WHERE id = ?",
-            (stream_id,),
+            "UPDATE stream_items SET status = 'crystallized' WHERE id = ? AND user_id = ?",
+            (stream_id, user_id),
         )
 
     return {

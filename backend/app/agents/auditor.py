@@ -30,16 +30,18 @@ class ActionProposalOutput(BaseModel):
     check_in_hours: int = Field(default=24, ge=1, le=168, description="建议多少小时后发起审计追问")
 
 
-async def propose_micro_action(node_id: str) -> dict[str, Any]:
+async def propose_micro_action(node_id: str, user_id: str = "usr_default") -> dict[str, Any]:
     with get_conn() as conn:
         node_row = conn.execute(
-            "SELECT * FROM crystallized_nodes WHERE id = ?", (node_id,)
+            "SELECT * FROM crystallized_nodes WHERE id = ? AND user_id = ?",
+            (node_id, user_id),
         ).fetchone()
         if not node_row:
             raise ValueError(f"未找到结晶节点: {node_id}")
 
         profile_row = conn.execute(
-            "SELECT profile_json FROM user_profile WHERE id = 'default'"
+            "SELECT profile_json FROM user_profile WHERE id = ?",
+            (user_id,),
         ).fetchone()
         profile = json.loads(profile_row["profile_json"]) if profile_row else {}
 
@@ -48,11 +50,11 @@ async def propose_micro_action(node_id: str) -> dict[str, Any]:
             """
             SELECT short_keyword, title, atomic_claim
             FROM crystallized_nodes
-            WHERE domain_slug = ? AND status = 'active' AND id != ?
+            WHERE user_id = ? AND domain_slug = ? AND status = 'active' AND id != ?
             ORDER BY CASE WHEN node_type = 'knowledge' THEN 0 ELSE 1 END, conversion_weight DESC
             LIMIT 4
             """,
-            (node_row["domain_slug"], node_id),
+            (user_id, node_row["domain_slug"], node_id),
         ).fetchall()
 
         # Pull user's recent real audit reflections so Auditor adapts continuously!
@@ -60,10 +62,11 @@ async def propose_micro_action(node_id: str) -> dict[str, Any]:
             """
             SELECT outcome_score, friction_tag, user_reflection
             FROM audit_logs
-            WHERE user_reflection IS NOT NULL AND trim(user_reflection) != ''
+            WHERE user_id = ? AND user_reflection IS NOT NULL AND trim(user_reflection) != ''
             ORDER BY created_at DESC
             LIMIT 5
-            """
+            """,
+            (user_id,),
         ).fetchall()
 
     bandwidth = profile.get("current_bandwidth", "medium")
@@ -103,6 +106,7 @@ async def propose_micro_action(node_id: str) -> dict[str, Any]:
         user_prompt=user_prompt,
         response_model=ActionProposalOutput,
         tier="reasoning",
+        user_id=user_id,
     )
 
     if bandwidth == "low":
@@ -117,12 +121,13 @@ async def propose_micro_action(node_id: str) -> dict[str, Any]:
         conn.execute(
             """
             INSERT INTO action_experiments
-            (id, node_id, theoretical_basis, hypothesis, trigger_condition, micro_action,
+            (id, user_id, node_id, theoretical_basis, hypothesis, trigger_condition, micro_action,
              success_metric, bandwidth_cost, status, check_in_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
             """,
             (
                 action_id,
+                user_id,
                 node_id,
                 proposal.theoretical_basis,
                 proposal.hypothesis,
@@ -153,6 +158,7 @@ def submit_action_audit(
     outcome_score: int,
     friction_tag: str = "none",
     user_reflection: str = "",
+    user_id: str = "usr_default",
 ) -> dict[str, Any]:
     """Deterministic closed-loop calibration writing real-world feedback back to Crystallized & Profile layers."""
     if outcome_score < -2 or outcome_score > 2:
@@ -160,16 +166,19 @@ def submit_action_audit(
 
     with get_conn() as conn:
         action_row = conn.execute(
-            "SELECT * FROM action_experiments WHERE id = ?", (action_id,)
+            "SELECT * FROM action_experiments WHERE id = ? AND user_id = ?",
+            (action_id, user_id),
         ).fetchone()
         if not action_row:
             raise ValueError(f"未找到行动实验: {action_id}")
 
         node_row = conn.execute(
-            "SELECT * FROM crystallized_nodes WHERE id = ?", (action_row["node_id"],)
+            "SELECT * FROM crystallized_nodes WHERE id = ? AND user_id = ?",
+            (action_row["node_id"], user_id),
         ).fetchone()
         profile_row = conn.execute(
-            "SELECT profile_json FROM user_profile WHERE id = 'default'"
+            "SELECT profile_json FROM user_profile WHERE id = ?",
+            (user_id,),
         ).fetchone()
         profile = json.loads(profile_row["profile_json"])
 
@@ -213,11 +222,12 @@ def submit_action_audit(
         conn.execute(
             """
             INSERT INTO audit_logs
-            (id, action_id, executed, outcome_score, friction_tag, user_reflection, calibration_delta_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (id, user_id, action_id, executed, outcome_score, friction_tag, user_reflection, calibration_delta_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 audit_id,
+                user_id,
                 action_id,
                 1 if executed else 0,
                 outcome_score,
@@ -228,28 +238,29 @@ def submit_action_audit(
         )
 
         conn.execute(
-            "UPDATE action_experiments SET status = ? WHERE id = ?",
-            (new_action_status, action_id),
+            "UPDATE action_experiments SET status = ? WHERE id = ? AND user_id = ?",
+            (new_action_status, action_id, user_id),
         )
         conn.execute(
             """
             UPDATE crystallized_nodes
             SET conversion_weight = ?, confidence = ?, status = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
-            (new_weight, new_conf, new_node_status, node_row["id"]),
+            (new_weight, new_conf, new_node_status, node_row["id"], user_id),
         )
         conn.execute(
-            "UPDATE user_profile SET profile_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 'default'",
-            (json.dumps(profile, ensure_ascii=False),),
+            "UPDATE user_profile SET profile_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (json.dumps(profile, ensure_ascii=False), user_id),
         )
         conn.execute(
             """
-            INSERT INTO profile_signals (id, signal_type, domain_slug, payload_json)
-            VALUES (?, 'action_audit', ?, ?)
+            INSERT INTO profile_signals (id, user_id, signal_type, domain_slug, payload_json)
+            VALUES (?, ?, 'action_audit', ?, ?)
             """,
             (
                 new_id("sig"),
+                user_id,
                 node_row["domain_slug"],
                 json.dumps(
                     {

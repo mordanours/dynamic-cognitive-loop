@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.agents.socratic import (
@@ -11,6 +11,7 @@ from app.agents.socratic import (
     get_due_socratic_nodes,
     get_socratic_history,
 )
+from app.services.auth import get_current_user
 from app.services.llm_client import LLMConfigError
 
 router = APIRouter(prefix="/api/socratic", tags=["socratic"])
@@ -29,19 +30,31 @@ class EvaluateRequest(BaseModel):
 
 
 @router.get("/due")
-def due_nodes_endpoint(domain_slug: str | None = None) -> dict:
-    return get_due_socratic_nodes(domain_slug)
+def due_nodes_endpoint(
+    domain_slug: str | None = None,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    return get_due_socratic_nodes(domain_slug, user_id=current_user["id"])
 
 
 @router.get("/history")
-def history_endpoint(node_id: str | None = None, limit: int = 20) -> list[dict]:
-    return get_socratic_history(node_id=node_id, limit=limit)
+def history_endpoint(
+    node_id: str | None = None,
+    limit: int = 20,
+    current_user: dict = Depends(get_current_user),
+) -> list[dict]:
+    return get_socratic_history(node_id=node_id, limit=limit, user_id=current_user["id"])
 
 
 @router.post("/challenge")
-async def challenge_endpoint(req: ChallengeRequest) -> dict:
+async def challenge_endpoint(
+    req: ChallengeRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
-        return await generate_socratic_challenge(req.node_id, req.difficulty)
+        return await generate_socratic_challenge(
+            req.node_id, req.difficulty, user_id=current_user["id"]
+        )
     except LLMConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
@@ -51,10 +64,17 @@ async def challenge_endpoint(req: ChallengeRequest) -> dict:
 
 
 @router.post("/evaluate")
-async def evaluate_endpoint(req: EvaluateRequest) -> dict:
+async def evaluate_endpoint(
+    req: EvaluateRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
         return await evaluate_socratic_answer(
-            req.node_id, req.question, req.user_answer, req.difficulty
+            req.node_id,
+            req.question,
+            req.user_answer,
+            req.difficulty,
+            user_id=current_user["id"],
         )
     except LLMConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -53,18 +53,22 @@ class SocraticEvalOutput(BaseModel):
     card_evolution: CardEvolutionSpec = Field(default_factory=CardEvolutionSpec)
 
 
-def get_due_socratic_nodes(domain_slug: str | None = None) -> dict[str, Any]:
+def get_due_socratic_nodes(
+    domain_slug: str | None = None,
+    user_id: str = "usr_default",
+) -> dict[str, Any]:
     with get_conn() as conn:
         profile_row = conn.execute(
-            "SELECT profile_json FROM user_profile WHERE id = 'default'"
+            "SELECT profile_json FROM user_profile WHERE id = ?",
+            (user_id,),
         ).fetchone()
         profile = json.loads(profile_row["profile_json"]) if profile_row else {}
         if profile.get("current_bandwidth") == "low":
             return {"suppressed_by_low_bandwidth": True, "due_nodes": []}
 
         now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        where = "status = 'active' AND (next_review_at IS NULL OR next_review_at <= ?)"
-        params: list[Any] = [now_iso]
+        where = "user_id = ? AND status = 'active' AND (next_review_at IS NULL OR next_review_at <= ?)"
+        params: list[Any] = [user_id, now_iso]
         if domain_slug:
             where += " AND domain_slug = ?"
             params.append(domain_slug)
@@ -84,7 +88,11 @@ def get_due_socratic_nodes(domain_slug: str | None = None) -> dict[str, Any]:
     return {"suppressed_by_low_bandwidth": False, "due_nodes": [dict(r) for r in rows]}
 
 
-def get_socratic_history(node_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+def get_socratic_history(
+    node_id: str | None = None,
+    limit: int = 20,
+    user_id: str = "usr_default",
+) -> list[dict[str, Any]]:
     with get_conn() as conn:
         if node_id:
             rows = conn.execute(
@@ -92,11 +100,11 @@ def get_socratic_history(node_id: str | None = None, limit: int = 20) -> list[di
                 SELECT l.*, n.title AS node_title, n.short_keyword
                 FROM socratic_logs l
                 JOIN crystallized_nodes n ON l.node_id = n.id
-                WHERE l.node_id = ?
+                WHERE l.user_id = ? AND l.node_id = ?
                 ORDER BY l.created_at DESC
                 LIMIT ?
                 """,
-                (node_id, limit),
+                (user_id, node_id, limit),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -104,10 +112,11 @@ def get_socratic_history(node_id: str | None = None, limit: int = 20) -> list[di
                 SELECT l.*, n.title AS node_title, n.short_keyword
                 FROM socratic_logs l
                 JOIN crystallized_nodes n ON l.node_id = n.id
+                WHERE l.user_id = ?
                 ORDER BY l.created_at DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (user_id, limit),
             ).fetchall()
     return [dict(r) for r in rows]
 
@@ -115,16 +124,19 @@ def get_socratic_history(node_id: str | None = None, limit: int = 20) -> list[di
 async def generate_socratic_challenge(
     node_id: str,
     difficulty: DifficultyLevel = "medium",
+    user_id: str = "usr_default",
 ) -> dict[str, Any]:
     with get_conn() as conn:
         node_row = conn.execute(
-            "SELECT * FROM crystallized_nodes WHERE id = ?", (node_id,)
+            "SELECT * FROM crystallized_nodes WHERE id = ? AND user_id = ?",
+            (node_id, user_id),
         ).fetchone()
         if not node_row:
             raise ValueError(f"未找到结晶节点: {node_id}")
 
         profile_row = conn.execute(
-            "SELECT profile_json FROM user_profile WHERE id = 'default'"
+            "SELECT profile_json FROM user_profile WHERE id = ?",
+            (user_id,),
         ).fetchone()
         profile = json.loads(profile_row["profile_json"]) if profile_row else {}
 
@@ -134,10 +146,10 @@ async def generate_socratic_challenge(
                 """
                 SELECT difficulty, question, user_answer, rating, feedback
                 FROM socratic_logs
-                WHERE node_id = ?
+                WHERE user_id = ? AND node_id = ?
                 ORDER BY created_at DESC LIMIT 2
                 """,
-                (node_id,),
+                (user_id, node_id),
             ).fetchall()
         ]
 
@@ -163,6 +175,7 @@ async def generate_socratic_challenge(
         user_prompt=user_prompt,
         response_model=SocraticChallengeOutput,
         tier="reasoning",
+        user_id=user_id,
     )
     return {
         "node_id": node_id,
@@ -177,10 +190,12 @@ async def evaluate_socratic_answer(
     question: str,
     user_answer: str,
     difficulty: DifficultyLevel = "medium",
+    user_id: str = "usr_default",
 ) -> dict[str, Any]:
     with get_conn() as conn:
         node_row = conn.execute(
-            "SELECT * FROM crystallized_nodes WHERE id = ?", (node_id,)
+            "SELECT * FROM crystallized_nodes WHERE id = ? AND user_id = ?",
+            (node_id, user_id),
         ).fetchone()
         if not node_row:
             raise ValueError(f"未找到结晶节点: {node_id}")
@@ -191,19 +206,19 @@ async def evaluate_socratic_answer(
                 """
                 SELECT difficulty, question, user_answer, rating, feedback, created_at
                 FROM socratic_logs
-                WHERE node_id = ?
+                WHERE user_id = ? AND node_id = ?
                 ORDER BY created_at DESC LIMIT 3
                 """,
-                (node_id,),
+                (user_id, node_id),
             ).fetchall()
         ]
 
         schema_row = conn.execute(
             """
             SELECT json_schema FROM domain_schemas
-            WHERE domain_slug = ? AND version = ?
+            WHERE user_id = ? AND domain_slug = ? AND version = ?
             """,
-            (node_row["domain_slug"], node_row["schema_version"]),
+            (user_id, node_row["domain_slug"], node_row["schema_version"]),
         ).fetchone()
         target_schema = json.loads(schema_row["json_schema"]) if schema_row else None
 
@@ -232,6 +247,7 @@ async def evaluate_socratic_answer(
         user_prompt=user_prompt,
         response_model=SocraticEvalOutput,
         tier="reasoning",
+        user_id=user_id,
     )
 
     # Validate & apply card density evolution if requested
@@ -285,11 +301,12 @@ async def evaluate_socratic_answer(
         conn.execute(
             """
             INSERT INTO socratic_logs
-            (id, node_id, difficulty, question, user_answer, rating, feedback, blind_spot_note, card_evolution_note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, user_id, node_id, difficulty, question, user_answer, rating, feedback, blind_spot_note, card_evolution_note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 log_id,
+                user_id,
                 node_id,
                 difficulty,
                 question,
@@ -304,17 +321,18 @@ async def evaluate_socratic_answer(
             """
             UPDATE crystallized_nodes
             SET fsrs_state_json = ?, next_review_at = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
-            (json.dumps(new_fsrs_state), next_review_at, node_id),
+            (json.dumps(new_fsrs_state), next_review_at, node_id, user_id),
         )
         conn.execute(
             """
-            INSERT INTO profile_signals (id, signal_type, domain_slug, payload_json)
-            VALUES (?, 'socratic_drill', ?, ?)
+            INSERT INTO profile_signals (id, user_id, signal_type, domain_slug, payload_json)
+            VALUES (?, ?, 'socratic_drill', ?, ?)
             """,
             (
                 new_id("sig"),
+                user_id,
                 node_row["domain_slug"],
                 json.dumps(
                     {

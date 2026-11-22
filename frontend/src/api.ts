@@ -176,11 +176,47 @@ export interface DomainFolder {
   created_at: string;
 }
 
+export interface AuthUser {
+  id: string;
+  username?: string;
+  nickname: string;
+  role: string;
+}
+
+const TOKEN_KEY = 'dcl_auth_token';
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setUnauthorizedHandler(fn: () => void) {
+  unauthorizedHandler = fn;
+}
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setStoredToken(token: string | null) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
+  const token = getStoredToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers,
   });
+  if (res.status === 401) {
+    setStoredToken(null);
+    unauthorizedHandler?.();
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || '请求失败');
@@ -189,6 +225,18 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getAuthConfig: () => req<{ invite_required: boolean; has_users: boolean }>('/api/auth/config'),
+  register: (payload: { username: string; password: string; nickname?: string; invite_code?: string }) =>
+    req<{ access_token: string; user: AuthUser }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  login: (payload: { username: string; password: string }) =>
+    req<{ access_token: string; user: AuthUser }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  me: () => req<AuthUser>('/api/auth/me'),
   getMetrics: () => req<Metrics>('/api/metrics'),
   getProfile: () => req<{ current_bandwidth: Bandwidth; domain_mastery: Record<string, { tier: number; actions_verified: number }> }>('/api/profile'),
   setBandwidth: (bandwidth: Bandwidth) =>

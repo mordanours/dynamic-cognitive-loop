@@ -13,6 +13,7 @@ import {
   GraduationCap,
   LayoutGrid,
   Loader2,
+  LogOut,
   Pencil,
   Settings,
   Zap,
@@ -21,16 +22,21 @@ import {
   ActionExperiment,
   api,
   ArchitectProposal,
+  AuthUser,
   Bandwidth,
   CrystallizedNode,
   DomainFolder,
   DomainSlug,
+  getStoredToken,
   Metrics,
   NodeType,
+  setStoredToken,
+  setUnauthorizedHandler,
   StreamItem,
 } from './api';
 import { ArchitectPanel } from './components/ArchitectPanel';
 import { AuditModal } from './components/AuditModal';
+import { AuthScreen } from './components/AuthScreen';
 import { SettingsModal } from './components/SettingsModal';
 import { SocraticModal } from './components/SocraticModal';
 import { SphericalTree3D } from './components/SphericalTree3D';
@@ -50,6 +56,9 @@ const DOMAINS: { slug: DomainSlug; name: string; desc: string }[] = [
 ];
 
 export function App() {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
   const [bandwidth, setBandwidth] = useState<Bandwidth>('medium');
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [streams, setStreams] = useState<StreamItem[]>([]);
@@ -97,8 +106,30 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+    });
+    const token = getStoredToken();
+    if (!token) {
+      setAuthChecked(true);
+      return;
+    }
+    api
+      .me()
+      .then((u) => {
+        setUser(u);
+      })
+      .catch(() => {
+        setStoredToken(null);
+        setUser(null);
+      })
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
     refreshAll().catch((e) => setBanner({ type: 'err', text: e.message }));
-  }, [refreshAll]);
+  }, [user, refreshAll]);
 
   const handleBandwidthChange = async (next: Bandwidth) => {
     setBandwidth(next);
@@ -163,6 +194,18 @@ export function App() {
     () => (selectedDomain ? activeActions.filter((a) => a.domain_slug === selectedDomain) : []),
     [activeActions, selectedDomain],
   );
+
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-xs text-slate-400">
+        正在校验登录状态...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthScreen onAuthenticated={(u) => setUser(u)} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 pb-24 text-slate-100">
@@ -261,6 +304,17 @@ export function App() {
             >
               <Settings className="h-3.5 w-3.5" />
               模型设置
+            </button>
+            <button
+              onClick={() => {
+                setStoredToken(null);
+                setUser(null);
+              }}
+              title={`当前用户: ${user.nickname} (点击退出)`}
+              className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-400 hover:border-rose-500/40 hover:text-rose-300"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{user.nickname}</span>
             </button>
           </div>
         </div>
@@ -792,6 +846,17 @@ export function App() {
           setBanner({ type: 'ok', text: '审计反馈已写入！权重与用户反馈记忆已更新。' });
         }}
       />
+
+      <footer className="mt-12 pb-6 text-center text-[11px] text-slate-600">
+        <a
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noreferrer"
+          className="hover:text-slate-400"
+        >
+          湘ICP备2026033436号
+        </a>
+      </footer>
     </div>
   );
 }

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.agents.auditor import propose_micro_action, submit_action_audit
 from app.db.database import get_conn
+from app.services.auth import get_current_user
 from app.services.llm_client import LLMConfigError
 
 router = APIRouter(prefix="/api/actions", tags=["actions"])
@@ -26,9 +27,12 @@ class AuditActionRequest(BaseModel):
 
 
 @router.post("/propose")
-async def propose_action_endpoint(req: ProposeActionRequest) -> dict:
+async def propose_action_endpoint(
+    req: ProposeActionRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
-        return await propose_micro_action(req.node_id)
+        return await propose_micro_action(req.node_id, user_id=current_user["id"])
     except LLMConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
@@ -38,7 +42,11 @@ async def propose_action_endpoint(req: ProposeActionRequest) -> dict:
 
 
 @router.post("/{action_id}/audit")
-def audit_action_endpoint(action_id: str, req: AuditActionRequest) -> dict:
+def audit_action_endpoint(
+    action_id: str,
+    req: AuditActionRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
         return submit_action_audit(
             action_id=action_id,
@@ -46,24 +54,30 @@ def audit_action_endpoint(action_id: str, req: AuditActionRequest) -> dict:
             outcome_score=req.outcome_score,
             friction_tag=req.friction_tag,
             user_reflection=req.user_reflection,
+            user_id=current_user["id"],
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("")
-def list_actions(status: str | None = None) -> list[dict]:
+def list_actions(
+    status: str | None = None,
+    current_user: dict = Depends(get_current_user),
+) -> list[dict]:
+    user_id = current_user["id"]
     with get_conn() as conn:
         query = """
             SELECT a.*, n.title AS node_title, n.domain_slug, n.atomic_claim, n.conversion_weight
             FROM action_experiments a
             JOIN crystallized_nodes n ON a.node_id = n.id
+            WHERE a.user_id = ?
         """
         if status:
             rows = conn.execute(
-                query + " WHERE a.status = ? ORDER BY a.created_at DESC",
-                (status,),
+                query + " AND a.status = ? ORDER BY a.created_at DESC",
+                (user_id, status),
             ).fetchall()
         else:
-            rows = conn.execute(query + " ORDER BY a.created_at DESC").fetchall()
+            rows = conn.execute(query + " ORDER BY a.created_at DESC", (user_id,)).fetchall()
     return [dict(r) for r in rows]

@@ -20,10 +20,8 @@ def new_id(prefix: str = "") -> str:
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token estimator suitable for mixed Chinese/English text."""
     if not text:
         return 0
-    # Average ~1.5 chars per token for mixed CJK/English
     return max(1, int(len(text) / 1.5))
 
 
@@ -57,7 +55,7 @@ def init_db() -> None:
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
-    """Safe additive migrations for existing Phase 1 SQLite databases."""
+    """Safe additive migrations for existing Phase 1-3 SQLite databases."""
     node_cols = {
         row["name"]
         for row in conn.execute("PRAGMA table_info(crystallized_nodes)").fetchall()
@@ -84,7 +82,39 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             "ALTER TABLE action_experiments ADD COLUMN theoretical_basis TEXT NOT NULL DEFAULT ''"
         )
 
-    # Backfill empty folder_path / short_keyword for existing nodes
+    # Multi-tenant user_id additive migration on all business tables
+    for table in (
+        "stream_items",
+        "domain_schemas",
+        "crystallized_nodes",
+        "action_experiments",
+        "audit_logs",
+        "profile_signals",
+        "architect_proposals",
+        "socratic_logs",
+        "domain_folders",
+    ):
+        cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if "user_id" not in cols:
+            conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN user_id TEXT NOT NULL DEFAULT 'usr_default'"
+            )
+
+    # Migrate legacy 'default' user_profile row to 'usr_default'
+    legacy_prof = conn.execute(
+        "SELECT profile_json FROM user_profile WHERE id = 'default'"
+    ).fetchone()
+    usr_prof = conn.execute(
+        "SELECT id FROM user_profile WHERE id = 'usr_default'"
+    ).fetchone()
+    if legacy_prof and not usr_prof:
+        conn.execute(
+            "INSERT INTO user_profile (id, profile_json) VALUES ('usr_default', ?)",
+            (legacy_prof["profile_json"],),
+        )
+        conn.execute("DELETE FROM user_profile WHERE id = 'default'")
+
+    # Backfill empty folder_path / short_keyword
     conn.execute(
         """
         UPDATE crystallized_nodes
@@ -101,16 +131,19 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     )
 
 
-def _seed_initial_data(conn: sqlite3.Connection) -> None:
+def seed_user_defaults(conn: sqlite3.Connection, user_id: str) -> None:
+    """Ensure a user has their own starter schemas, profile, and fixed system folders."""
     for s in SEED_SCHEMAS:
+        schema_id = s["id"] if user_id == "usr_default" else f"{s['id']}_{user_id}"
         conn.execute(
             """
             INSERT OR IGNORE INTO domain_schemas
-            (id, domain_slug, domain_name, version, mastery_tier, json_schema, rationale, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, user_id, domain_slug, domain_name, version, mastery_tier, json_schema, rationale, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                s["id"],
+                schema_id,
+                user_id,
                 s["domain_slug"],
                 s["domain_name"],
                 s["version"],
@@ -122,20 +155,31 @@ def _seed_initial_data(conn: sqlite3.Connection) -> None:
         )
 
     existing_profile = conn.execute(
-        "SELECT id FROM user_profile WHERE id = 'default'"
+        "SELECT id FROM user_profile WHERE id = ?", (user_id,)
     ).fetchone()
     if not existing_profile:
         conn.execute(
-            "INSERT INTO user_profile (id, profile_json) VALUES ('default', ?)",
-            (json.dumps(DEFAULT_USER_PROFILE, ensure_ascii=False),),
+            "INSERT INTO user_profile (id, profile_json) VALUES (?, ?)",
+            (user_id, json.dumps(DEFAULT_USER_PROFILE, ensure_ascii=False)),
         )
 
-    # Seed fixed system subfolder '核心认知' for each domain
     for domain_slug in ("investing", "learning"):
+        fld_id = (
+            f"fld_{domain_slug}_core"
+            if user_id == "usr_default"
+            else f"fld_{domain_slug}_core_{user_id}"
+        )
         conn.execute(
             """
-            INSERT OR IGNORE INTO domain_folders (id, domain_slug, folder_name, is_system)
-            VALUES (?, ?, '核心认知', 1)
+            INSERT OR IGNORE INTO domain_folders (id, user_id, domain_slug, folder_name, is_system)
+            VALUES (?, ?, ?, '核心认知', 1)
             """,
-            (f"fld_{domain_slug}_core", domain_slug),
+            (fld_id, user_id, domain_slug),
         )
+
+
+def _seed_initial_data(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO users (id, nickname, role, is_active) VALUES ('usr_default', 'Admin', 'admin', 1)"
+    )
+    seed_user_defaults(conn, "usr_default")

@@ -1,0 +1,29 @@
+services:
+  api:
+    build:
+      context: ./backend
+    container_name: cognitive-loop-api
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      COGNITIVE_DATA_DIR: /app/data
+      COGNITIVE_VAULT_DIR: /app/vault
+    volumes:
+      - ./data:/app/data
+      - ./vault:/app/vault
+
+  web:
+    build:
+      context: ./frontend
+    container_name: cognitive-loop-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro

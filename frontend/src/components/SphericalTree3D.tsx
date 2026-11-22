@@ -382,7 +382,7 @@ export function SphericalTree3D({ nodes, folders, onStartSocratic, onProposeActi
 
       <canvas
         ref={canvasRef}
-        className="h-[640px] w-full cursor-grab active:cursor-grabbing"
+        className="h-[640px] w-full cursor-grab touch-none active:cursor-grabbing"
         onMouseDown={(e) => {
           dragRef.current = { active: true, x: e.clientX, y: e.clientY, moved: false };
         }}
@@ -411,6 +411,33 @@ export function SphericalTree3D({ nodes, folders, onStartSocratic, onProposeActi
         onMouseLeave={() => {
           dragRef.current.active = false;
           setHoveredId(null);
+        }}
+        onTouchStart={(e) => {
+          if (e.touches.length === 1) {
+            const t = e.touches[0];
+            dragRef.current = { active: true, x: t.clientX, y: t.clientY, moved: false };
+          }
+        }}
+        onTouchMove={(e) => {
+          if (dragRef.current.active && e.touches.length === 1) {
+            const t = e.touches[0];
+            const dx = t.clientX - dragRef.current.x;
+            const dy = t.clientY - dragRef.current.y;
+            if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragRef.current.moved = true;
+            rotRef.current.yaw += dx * 0.007;
+            rotRef.current.pitch = Math.max(-1.3, Math.min(1.3, rotRef.current.pitch + dy * 0.007));
+            dragRef.current.x = t.clientX;
+            dragRef.current.y = t.clientY;
+          }
+        }}
+        onTouchEnd={(e) => {
+          const wasMoved = dragRef.current.moved;
+          dragRef.current.active = false;
+          if (!wasMoved && e.changedTouches.length === 1) {
+            const t = e.changedTouches[0];
+            const hit = hitTest(t.clientX, t.clientY);
+            if (hit?.data) setSelectedNode(hit.data);
+          }
         }}
         onWheel={(e) => {
           e.preventDefault();

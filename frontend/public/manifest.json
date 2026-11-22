@@ -1,0 +1,10 @@
+{
+  "name": "Dynamic Cognitive Loop",
+  "short_name": "CognitiveLoop",
+  "description": "Agentic PKM — 从 AI 对话到现实决策的动态认知闭环系统",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#4f46e5",
+  "icons": []
+}

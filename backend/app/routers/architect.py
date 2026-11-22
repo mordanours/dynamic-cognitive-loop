@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.agents.architect import (
@@ -16,6 +16,7 @@ from app.agents.architect import (
     scan_domain_for_proposals,
 )
 from app.db.database import get_conn
+from app.services.auth import get_current_user
 from app.services.llm_client import LLMConfigError
 
 router = APIRouter(prefix="/api/architect", tags=["architect"])
@@ -29,10 +30,19 @@ class RefineRequest(BaseModel):
     user_suggestion: str
 
 
+class EvolvePreviewRequest(BaseModel):
+    domain_slug: Literal["investing", "learning"]
+    custom_fields: list[CustomSchemaField] | None = None
+    evolution_goal: str = ""
+
+
 @router.post("/scan")
-async def scan_domain_endpoint(req: ScanRequest) -> dict:
+async def scan_domain_endpoint(
+    req: ScanRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
-        return await scan_domain_for_proposals(req.domain_slug)
+        return await scan_domain_for_proposals(req.domain_slug, user_id=current_user["id"])
     except LLMConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -40,10 +50,15 @@ async def scan_domain_endpoint(req: ScanRequest) -> dict:
 
 
 @router.get("/proposals")
-def list_proposals(domain_slug: str | None = None, status: str = "pending") -> list[dict]:
+def list_proposals(
+    domain_slug: str | None = None,
+    status: str = "pending",
+    current_user: dict = Depends(get_current_user),
+) -> list[dict]:
+    user_id = current_user["id"]
     with get_conn() as conn:
-        where = ["status = ?"]
-        params: list[str] = [status]
+        where = ["user_id = ?", "status = ?"]
+        params: list[str] = [user_id, status]
         if domain_slug:
             where.append("domain_slug = ?")
             params.append(domain_slug)
@@ -66,9 +81,9 @@ def list_proposals(domain_slug: str | None = None, status: str = "pending") -> l
                     f"""
                     SELECT id, node_type, folder_path, short_keyword, title, atomic_claim,
                            payload_json, confidence, conversion_weight
-                    FROM crystallized_nodes WHERE id IN ({placeholders})
+                    FROM crystallized_nodes WHERE id IN ({placeholders}) AND user_id = ?
                     """,
-                    tuple(target_ids),
+                    (*target_ids, user_id),
                 ).fetchall()
                 d["target_nodes"] = [
                     {**dict(tr), "payload": json.loads(tr["payload_json"])} for tr in trows
@@ -80,25 +95,37 @@ def list_proposals(domain_slug: str | None = None, status: str = "pending") -> l
 
 
 @router.post("/proposals/{proposal_id}/approve")
-def approve_proposal_endpoint(proposal_id: str) -> dict:
+def approve_proposal_endpoint(
+    proposal_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
-        return approve_proposal(proposal_id)
+        return approve_proposal(proposal_id, user_id=current_user["id"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/proposals/{proposal_id}/reject")
-def reject_proposal_endpoint(proposal_id: str) -> dict:
+def reject_proposal_endpoint(
+    proposal_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
-        return reject_proposal(proposal_id)
+        return reject_proposal(proposal_id, user_id=current_user["id"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/proposals/{proposal_id}/refine")
-async def refine_proposal_endpoint(proposal_id: str, req: RefineRequest) -> dict:
+async def refine_proposal_endpoint(
+    proposal_id: str,
+    req: RefineRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
-        return await refine_proposal(proposal_id, req.user_suggestion)
+        return await refine_proposal(
+            proposal_id, req.user_suggestion, user_id=current_user["id"]
+        )
     except LLMConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
@@ -108,23 +135,24 @@ async def refine_proposal_endpoint(proposal_id: str, req: RefineRequest) -> dict
 
 
 @router.get("/schema-status/{domain_slug}")
-def schema_status_endpoint(domain_slug: Literal["investing", "learning"]) -> dict:
-    return get_schema_evolution_status(domain_slug)
-
-
-class EvolvePreviewRequest(BaseModel):
-    domain_slug: Literal["investing", "learning"]
-    custom_fields: list[CustomSchemaField] | None = None
-    evolution_goal: str = ""
+def schema_status_endpoint(
+    domain_slug: Literal["investing", "learning"],
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    return get_schema_evolution_status(domain_slug, user_id=current_user["id"])
 
 
 @router.post("/evolve-schema/preview")
-async def evolve_schema_preview_endpoint(req: EvolvePreviewRequest) -> dict:
+async def evolve_schema_preview_endpoint(
+    req: EvolvePreviewRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
         return await preview_schema_evolution(
             req.domain_slug,
             custom_fields=req.custom_fields,
             evolution_goal=req.evolution_goal,
+            user_id=current_user["id"],
         )
     except LLMConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

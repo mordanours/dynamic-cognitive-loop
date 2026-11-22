@@ -1,8 +1,33 @@
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS users (
+    id              TEXT PRIMARY KEY,
+    nickname        TEXT NOT NULL,
+    role            TEXT NOT NULL DEFAULT 'user',
+    is_active       INTEGER NOT NULL DEFAULT 1,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_identities (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider        TEXT NOT NULL,                 -- 'password' | 'wechat_miniapp'
+    identifier      TEXT NOT NULL,                 -- username or wechat openid
+    secret_hash     TEXT,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(provider, identifier)
+);
+
+CREATE TABLE IF NOT EXISTS user_llm_settings (
+    user_id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    settings_json   TEXT NOT NULL,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS stream_items (
     id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL DEFAULT 'usr_default',
     source          TEXT NOT NULL DEFAULT 'chat_paste',
     domain_hint     TEXT NOT NULL DEFAULT 'investing',
     raw_content     TEXT NOT NULL,
@@ -16,6 +41,7 @@ CREATE TABLE IF NOT EXISTS stream_items (
 
 CREATE TABLE IF NOT EXISTS domain_schemas (
     id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL DEFAULT 'usr_default',
     domain_slug     TEXT NOT NULL,
     domain_name     TEXT NOT NULL,
     version         INTEGER NOT NULL,
@@ -24,17 +50,17 @@ CREATE TABLE IF NOT EXISTS domain_schemas (
     ui_hints_json   TEXT,
     rationale       TEXT,
     is_active       INTEGER NOT NULL DEFAULT 1,
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(domain_slug, version)
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS crystallized_nodes (
     id                  TEXT PRIMARY KEY,
+    user_id             TEXT NOT NULL DEFAULT 'usr_default',
     domain_slug         TEXT NOT NULL,
     schema_version      INTEGER NOT NULL,
-    node_type           TEXT NOT NULL DEFAULT 'decision', -- 'knowledge' | 'decision'
-    folder_path         TEXT NOT NULL DEFAULT '',         -- 如 'investing/仓位与择时'
-    short_keyword       TEXT NOT NULL DEFAULT '',         -- 知识类用名词短语，决策类用动词短语
+    node_type           TEXT NOT NULL DEFAULT 'decision',
+    folder_path         TEXT NOT NULL DEFAULT '',
+    short_keyword       TEXT NOT NULL DEFAULT '',
     title               TEXT NOT NULL,
     atomic_claim        TEXT NOT NULL,
     payload_json        TEXT NOT NULL,
@@ -47,7 +73,7 @@ CREATE TABLE IF NOT EXISTS crystallized_nodes (
     fsrs_state_json     TEXT,
     next_review_at      DATETIME,
     needs_verification  INTEGER NOT NULL DEFAULT 0,
-    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -55,12 +81,13 @@ CREATE TABLE IF NOT EXISTS node_edges (
     source_id       TEXT NOT NULL,
     target_id       TEXT NOT NULL,
     relation_type   TEXT NOT NULL,
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (source_id, target_id, relation_type)
 );
 
 CREATE TABLE IF NOT EXISTS action_experiments (
     id                  TEXT PRIMARY KEY,
+    user_id             TEXT NOT NULL DEFAULT 'usr_default',
     node_id             TEXT NOT NULL REFERENCES crystallized_nodes(id) ON DELETE CASCADE,
     theoretical_basis   TEXT NOT NULL DEFAULT '',
     hypothesis          TEXT NOT NULL,
@@ -75,6 +102,7 @@ CREATE TABLE IF NOT EXISTS action_experiments (
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id                      TEXT PRIMARY KEY,
+    user_id                 TEXT NOT NULL DEFAULT 'usr_default',
     action_id               TEXT NOT NULL REFERENCES action_experiments(id) ON DELETE CASCADE,
     executed                INTEGER NOT NULL,
     outcome_score           INTEGER NOT NULL,
@@ -85,13 +113,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 CREATE TABLE IF NOT EXISTS user_profile (
-    id              TEXT PRIMARY KEY,
+    id              TEXT PRIMARY KEY,              -- equals user_id
     profile_json    TEXT NOT NULL,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS profile_signals (
     id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL DEFAULT 'usr_default',
     signal_type     TEXT NOT NULL,
     domain_slug     TEXT,
     payload_json    TEXT NOT NULL,
@@ -100,17 +129,19 @@ CREATE TABLE IF NOT EXISTS profile_signals (
 
 CREATE TABLE IF NOT EXISTS architect_proposals (
     id                      TEXT PRIMARY KEY,
+    user_id                 TEXT NOT NULL DEFAULT 'usr_default',
     domain_slug             TEXT NOT NULL,
-    proposal_type           TEXT NOT NULL, -- 'merge_duplicates' | 'deprecate_low_utility' | 'evolve_schema'
+    proposal_type           TEXT NOT NULL,
     target_node_ids_json    TEXT NOT NULL,
     proposed_node_json      TEXT,
     rationale               TEXT NOT NULL,
-    status                  TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'approved' | 'rejected'
+    status                  TEXT NOT NULL DEFAULT 'pending',
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS socratic_logs (
     id                      TEXT PRIMARY KEY,
+    user_id                 TEXT NOT NULL DEFAULT 'usr_default',
     node_id                 TEXT NOT NULL REFERENCES crystallized_nodes(id) ON DELETE CASCADE,
     difficulty              TEXT NOT NULL DEFAULT 'medium',
     question                TEXT NOT NULL,
@@ -124,9 +155,10 @@ CREATE TABLE IF NOT EXISTS socratic_logs (
 
 CREATE TABLE IF NOT EXISTS domain_folders (
     id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL DEFAULT 'usr_default',
     domain_slug     TEXT NOT NULL,
     folder_name     TEXT NOT NULL,
-    is_system       INTEGER NOT NULL DEFAULT 0, -- 1 for fixed '核心认知'
+    is_system       INTEGER NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(domain_slug, folder_name)
+    UNIQUE(user_id, domain_slug, folder_name)
 );

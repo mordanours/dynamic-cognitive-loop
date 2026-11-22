@@ -28,8 +28,11 @@ def _extract_json_block(raw: str) -> str:
     return raw
 
 
-def _build_client(tier: Literal["fast", "reasoning"] = "reasoning") -> tuple[AsyncOpenAI, str]:
-    settings = get_llm_settings()
+def _build_client(
+    tier: Literal["fast", "reasoning"] = "reasoning",
+    user_id: str = "usr_default",
+) -> tuple[AsyncOpenAI, str]:
+    settings = get_llm_settings(user_id=user_id)
     profile = settings.current_profile()
     if settings.active_provider != "local" and not profile.api_key.strip():
         raise LLMConfigError(
@@ -51,9 +54,10 @@ async def call_structured_llm(
     response_model: Type[T],
     tier: Literal["fast", "reasoning"] = "reasoning",
     max_retries: int = 2,
+    user_id: str = "usr_default",
 ) -> T:
     """Call OpenAI-compatible API and validate output into a Pydantic model."""
-    client, model = _build_client(tier=tier)
+    client, model = _build_client(tier=tier, user_id=user_id)
     schema_hint = json.dumps(response_model.model_json_schema(), ensure_ascii=False)
 
     messages: list[dict[str, str]] = [
@@ -102,8 +106,8 @@ async def call_structured_llm(
     raise RuntimeError(f"LLM 结构化输出校验失败（已重试 {max_retries} 次）: {last_error}")
 
 
-async def test_llm_connection() -> dict[str, str]:
-    client, model = _build_client(tier="fast")
+async def test_llm_connection(user_id: str = "usr_default") -> dict[str, str]:
+    client, model = _build_client(tier="fast", user_id=user_id)
     resp = await client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": "请回复 OK"}],
