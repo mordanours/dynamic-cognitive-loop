@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 from typing import Literal, Type, TypeVar
@@ -116,3 +117,44 @@ async def test_llm_connection(user_id: str = "usr_default") -> dict[str, str]:
     )
     reply = (resp.choices[0].message.content or "").strip()
     return {"status": "ok", "model": model, "reply": reply}
+
+
+async def extract_image_insights(
+    image_bytes: bytes,
+    mime_type: str,
+    user_id: str = "usr_default",
+) -> str:
+    """Use user's configured Vision model (if enabled) to extract text, tables, and key data from an image."""
+    settings = get_llm_settings(user_id=user_id)
+    vision = settings.vision
+    if not vision.enabled:
+        return ""
+    if not vision.api_key.strip() and "localhost" not in vision.base_url and "127.0.0.1" not in vision.base_url:
+        return ""
+
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    client = AsyncOpenAI(
+        api_key=vision.api_key.strip() or "ollama",
+        base_url=vision.base_url.strip().rstrip("/"),
+        timeout=60.0,
+    )
+    resp = await client.chat.completions.create(
+        model=vision.model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "请完整提取这张图片中的核心文字、数据指标、对比表格（请用 Markdown 表格输出）以及图表结论，保持客观准确。",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{b64}"},
+                    },
+                ],
+            }
+        ],
+        max_tokens=1500,
+    )
+    return (resp.choices[0].message.content or "").strip()

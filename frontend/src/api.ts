@@ -13,6 +13,13 @@ export interface UserDomain {
   is_archived: number;
 }
 
+export interface NodeAttachment {
+  id: string;
+  filename: string;
+  content_type: string;
+  is_image: number;
+}
+
 export interface RichBlock {
   title: string;
   markdown: string;
@@ -39,6 +46,7 @@ export interface CrystallizedNode {
   atomic_claim: string;
   payload: Record<string, unknown>;
   rich_blocks?: RichBlock[];
+  attachments?: NodeAttachment[];
   confidence: number;
   conversion_weight: number;
   status: string;
@@ -88,9 +96,19 @@ export interface ProviderProfile {
   api_key_masked?: string;
 }
 
+export interface VisionConfig {
+  enabled: boolean;
+  base_url: string;
+  api_key: string;
+  model: string;
+  has_api_key?: boolean;
+  api_key_masked?: string;
+}
+
 export interface LLMSettings {
   active_provider: ProviderType;
   profiles: Record<ProviderType, ProviderProfile>;
+  vision?: VisionConfig;
 }
 
 export interface ArchitectProposal {
@@ -262,11 +280,33 @@ export const api = {
       body: JSON.stringify({ bandwidth }),
     }),
   listStream: () => req<StreamItem[]>('/api/stream'),
-  createStream: (raw_content: string, domain_hint: DomainSlug) =>
+  createStream: (raw_content: string, domain_hint: DomainSlug, attachment_ids: string[] = []) =>
     req<StreamItem>('/api/stream', {
       method: 'POST',
-      body: JSON.stringify({ raw_content, domain_hint }),
+      body: JSON.stringify({ raw_content, domain_hint, attachment_ids }),
     }),
+  uploadFile: async (file: File) => {
+    const token = getStoredToken();
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/files/upload', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || '上传失败');
+    }
+    return res.json() as Promise<{
+      file_id: string;
+      filename: string;
+      content_type: string;
+      is_image: boolean;
+      extracted_text: string;
+      vision_used: boolean;
+    }>;
+  },
   deleteStream: (id: string) => req<{ deleted: string }>(`/api/stream/${id}`, { method: 'DELETE' }),
   distillStream: (stream_id: string, domain_slug: DomainSlug) =>
     req<{

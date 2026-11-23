@@ -75,6 +75,13 @@ class ProviderProfile(BaseModel):
     reasoning_model: str
 
 
+class VisionConfig(BaseModel):
+    enabled: bool = False
+    base_url: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model: str = "gpt-4o-mini"
+
+
 class LLMSettings(BaseModel):
     active_provider: ProviderType = "deepseek"
     profiles: dict[ProviderType, ProviderProfile] = Field(
@@ -102,6 +109,7 @@ class LLMSettings(BaseModel):
             ),
         }
     )
+    vision: VisionConfig = Field(default_factory=VisionConfig)
 
     def current_profile(self) -> ProviderProfile:
         return self.profiles[self.active_provider]
@@ -122,6 +130,8 @@ def get_llm_settings(user_id: str = "usr_default") -> LLMSettings:
                 for prof in data.get("profiles", {}).values():
                     if prof.get("api_key_enc"):
                         prof["api_key"] = decrypt_secret(prof.pop("api_key_enc"))
+                if data.get("vision", {}).get("api_key_enc"):
+                    data["vision"]["api_key"] = decrypt_secret(data["vision"].pop("api_key_enc"))
                 return LLMSettings.model_validate(data)
     except Exception:
         pass
@@ -147,6 +157,9 @@ def save_llm_settings(settings: LLMSettings, user_id: str = "usr_default") -> LL
     for prof in data["profiles"].values():
         plain = prof.pop("api_key", "")
         prof["api_key_enc"] = encrypt_secret(plain)
+    if "vision" in data:
+        v_plain = data["vision"].pop("api_key", "")
+        data["vision"]["api_key_enc"] = encrypt_secret(v_plain)
 
     with get_conn() as conn:
         conn.execute(

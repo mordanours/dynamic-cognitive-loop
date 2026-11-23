@@ -13,10 +13,11 @@ router = APIRouter(prefix="/api/stream", tags=["stream"])
 
 
 class CreateStreamRequest(BaseModel):
-    raw_content: str = Field(..., min_length=5, description="原始对话记录或临时灵感")
+    raw_content: str = Field(..., min_length=2, description="原始对话记录或临时灵感")
     domain_hint: str = "investing"
     source: str = "chat_paste"
     ttl_days: int = Field(default=7, ge=1, le=30)
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 @router.post("")
@@ -31,14 +32,26 @@ def create_stream_item(
         datetime.now(timezone.utc) + timedelta(days=req.ttl_days)
     ).isoformat(timespec="seconds")
 
+    import json
+
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO stream_items
-            (id, user_id, source, domain_hint, raw_content, token_count, salience_score, status, ttl_days, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, 1.0, 'inbox', ?, ?)
+            (id, user_id, source, domain_hint, raw_content, attachment_ids_json, token_count, salience_score, status, ttl_days, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1.0, 'inbox', ?, ?)
             """,
-            (item_id, user_id, req.source, req.domain_hint, req.raw_content, tokens, req.ttl_days, expires_at),
+            (
+                item_id,
+                user_id,
+                req.source,
+                req.domain_hint,
+                req.raw_content,
+                json.dumps(req.attachment_ids),
+                tokens,
+                req.ttl_days,
+                expires_at,
+            ),
         )
         row = conn.execute("SELECT * FROM stream_items WHERE id = ?", (item_id,)).fetchone()
     return dict(row)

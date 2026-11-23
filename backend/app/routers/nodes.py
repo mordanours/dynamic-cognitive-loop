@@ -73,14 +73,28 @@ def list_nodes(
             tuple(params),
         ).fetchall()
     result = []
-    for r in rows:
-        d = dict(r)
-        d["payload"] = json.loads(d["payload_json"])
-        try:
-            d["rich_blocks"] = json.loads(d.get("rich_blocks_json") or "[]")
-        except Exception:
-            d["rich_blocks"] = []
-        result.append(d)
+    with get_conn() as conn:
+        for r in rows:
+            d = dict(r)
+            d["payload"] = json.loads(d["payload_json"])
+            try:
+                d["rich_blocks"] = json.loads(d.get("rich_blocks_json") or "[]")
+            except Exception:
+                d["rich_blocks"] = []
+            try:
+                att_ids = json.loads(d.get("attachment_ids_json") or "[]")
+            except Exception:
+                att_ids = []
+            if att_ids:
+                placeholders = ",".join("?" for _ in att_ids)
+                frows = conn.execute(
+                    f"SELECT id, filename, content_type, is_image FROM uploaded_files WHERE id IN ({placeholders}) AND user_id = ?",
+                    (*att_ids, current_user["id"]),
+                ).fetchall()
+                d["attachments"] = [dict(fr) for fr in frows]
+            else:
+                d["attachments"] = []
+            result.append(d)
     return result
 
 

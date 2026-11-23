@@ -178,9 +178,9 @@ async def distill_stream_item(
                 """
                 INSERT INTO crystallized_nodes
                 (id, user_id, domain_slug, schema_version, node_type, folder_path, short_keyword,
-                 title, atomic_claim, payload_json, rich_blocks_json, confidence, conversion_weight,
-                 status, source_stream_ids, discarded_noise, compression_ratio)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                 title, atomic_claim, payload_json, rich_blocks_json, attachment_ids_json,
+                 confidence, conversion_weight, status, source_stream_ids, discarded_noise, compression_ratio)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
                 """,
                 (
                     node_id,
@@ -194,6 +194,7 @@ async def distill_stream_item(
                     draft.atomic_claim,
                     payload_str,
                     rich_blocks_str,
+                    stream_row["attachment_ids_json"] if "attachment_ids_json" in stream_row.keys() else "[]",
                     draft.confidence,
                     0.5,
                     json.dumps([stream_id]),

@@ -22,6 +22,16 @@ def _mask_settings(settings: LLMSettings) -> dict:
             p["api_key_masked"] = ""
         # Never return plaintext API keys over the network
         p["api_key"] = ""
+    if "vision" in data:
+        vk = data["vision"].get("api_key", "")
+        data["vision"]["has_api_key"] = bool(vk and vk != "ollama")
+        if len(vk) > 8:
+            data["vision"]["api_key_masked"] = f"{vk[:4]}...{vk[-4:]}"
+        elif vk:
+            data["vision"]["api_key_masked"] = "****"
+        else:
+            data["vision"]["api_key_masked"] = ""
+        data["vision"]["api_key"] = ""
     return data
 
 
@@ -40,6 +50,8 @@ def update_llm_config(
     for provider_key, profile in new_settings.profiles.items():
         if profile.api_key == "__KEEP__":
             profile.api_key = existing.profiles[provider_key].api_key
+    if new_settings.vision.api_key == "__KEEP__":
+        new_settings.vision.api_key = existing.vision.api_key
     saved = save_llm_settings(new_settings, user_id=user_id)
     return _mask_settings(saved)
 

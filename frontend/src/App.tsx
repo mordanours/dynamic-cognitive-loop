@@ -39,6 +39,7 @@ import {
 } from './api';
 import { ArchitectPanel } from './components/ArchitectPanel';
 import { AuditModal } from './components/AuditModal';
+import { AuthImage } from './components/AuthImage';
 import { AuthScreen } from './components/AuthScreen';
 import { RichMarkdown } from './components/RichMarkdown';
 import { SettingsModal } from './components/SettingsModal';
@@ -875,6 +876,20 @@ export function App() {
                           <RichMarkdown content={rb.markdown} />
                         </div>
                       ))}
+
+                      {/* Authenticated Attachments (Images & Documents) */}
+                      {(node.attachments || []).length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {node.attachments?.map((att) => (
+                            <AuthImage
+                              key={att.id}
+                              fileId={att.id}
+                              filename={att.filename}
+                              isImage={att.is_image}
+                            />
+                          ))}
+                        </div>
+                      )}
 
                       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                         <button

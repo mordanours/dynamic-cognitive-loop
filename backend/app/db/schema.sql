@@ -30,8 +30,9 @@ CREATE TABLE IF NOT EXISTS stream_items (
     user_id         TEXT NOT NULL DEFAULT 'usr_default',
     source          TEXT NOT NULL DEFAULT 'chat_paste',
     domain_hint     TEXT NOT NULL DEFAULT 'investing',
-    raw_content     TEXT NOT NULL,
-    token_count     INTEGER NOT NULL,
+    raw_content         TEXT NOT NULL,
+    attachment_ids_json TEXT NOT NULL DEFAULT '[]',
+    token_count         INTEGER NOT NULL,
     salience_score  REAL NOT NULL DEFAULT 1.0,
     status          TEXT NOT NULL DEFAULT 'inbox',
     ttl_days        INTEGER NOT NULL DEFAULT 7,
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS crystallized_nodes (
     atomic_claim        TEXT NOT NULL,
     payload_json        TEXT NOT NULL,
     rich_blocks_json    TEXT NOT NULL DEFAULT '[]',
+    attachment_ids_json TEXT NOT NULL DEFAULT '[]',
     confidence          REAL NOT NULL DEFAULT 0.6,
     conversion_weight   REAL NOT NULL DEFAULT 0.5,
     status              TEXT NOT NULL DEFAULT 'active',
@@ -174,5 +176,17 @@ CREATE TABLE IF NOT EXISTS domain_folders (
     folder_name     TEXT NOT NULL,
     parent_id       TEXT DEFAULT NULL,
     is_system       INTEGER NOT NULL DEFAULT 0,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS uploaded_files (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL DEFAULT 'usr_default',
+    filename        TEXT NOT NULL,
+    content_type    TEXT NOT NULL,
+    file_size       INTEGER NOT NULL,
+    storage_path    TEXT NOT NULL,
+    extracted_text  TEXT NOT NULL DEFAULT '',
+    is_image        INTEGER NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

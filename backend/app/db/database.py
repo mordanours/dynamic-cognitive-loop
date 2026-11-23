@@ -76,6 +76,19 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE crystallized_nodes ADD COLUMN rich_blocks_json TEXT NOT NULL DEFAULT '[]'"
         )
+    if "attachment_ids_json" not in node_cols:
+        conn.execute(
+            "ALTER TABLE crystallized_nodes ADD COLUMN attachment_ids_json TEXT NOT NULL DEFAULT '[]'"
+        )
+
+    stream_cols = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(stream_items)").fetchall()
+    }
+    if "attachment_ids_json" not in stream_cols:
+        conn.execute(
+            "ALTER TABLE stream_items ADD COLUMN attachment_ids_json TEXT NOT NULL DEFAULT '[]'"
+        )
 
     folder_cols = {
         row["name"]
