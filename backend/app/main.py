@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import init_db
-from app.routers import actions, architect, auth, nodes, profile, settings, socratic, stream
+from app.routers import actions, architect, auth, domains, nodes, profile, settings, socratic, stream
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 
@@ -36,6 +36,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(domains.router)
 app.include_router(stream.router)
 app.include_router(nodes.router)
 app.include_router(actions.router)

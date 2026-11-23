@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -23,7 +22,7 @@ router = APIRouter(prefix="/api/architect", tags=["architect"])
 
 
 class ScanRequest(BaseModel):
-    domain_slug: Literal["investing", "learning"]
+    domain_slug: str
 
 
 class RefineRequest(BaseModel):
@@ -31,7 +30,7 @@ class RefineRequest(BaseModel):
 
 
 class EvolvePreviewRequest(BaseModel):
-    domain_slug: Literal["investing", "learning"]
+    domain_slug: str
     custom_fields: list[CustomSchemaField] | None = None
     evolution_goal: str = ""
 
@@ -136,7 +135,7 @@ async def refine_proposal_endpoint(
 
 @router.get("/schema-status/{domain_slug}")
 def schema_status_endpoint(
-    domain_slug: Literal["investing", "learning"],
+    domain_slug: str,
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     return get_schema_evolution_status(domain_slug, user_id=current_user["id"])

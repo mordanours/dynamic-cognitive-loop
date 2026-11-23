@@ -72,6 +72,19 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE crystallized_nodes ADD COLUMN short_keyword TEXT NOT NULL DEFAULT ''"
         )
+    if "rich_blocks_json" not in node_cols:
+        conn.execute(
+            "ALTER TABLE crystallized_nodes ADD COLUMN rich_blocks_json TEXT NOT NULL DEFAULT '[]'"
+        )
+
+    folder_cols = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(domain_folders)").fetchall()
+    }
+    if "parent_id" not in folder_cols:
+        conn.execute(
+            "ALTER TABLE domain_folders ADD COLUMN parent_id TEXT DEFAULT NULL"
+        )
 
     action_cols = {
         row["name"]
@@ -163,7 +176,22 @@ def seed_user_defaults(conn: sqlite3.Connection, user_id: str) -> None:
             (user_id, json.dumps(DEFAULT_USER_PROFILE, ensure_ascii=False)),
         )
 
-    for domain_slug in ("investing", "learning"):
+    for domain_slug, domain_name, domain_desc in (
+        ("investing", "个人投资与决策", "仓位纪律、赔率模型与风险边界"),
+        ("learning", "教育学习", "费曼类比、心智模型与跨场景迁移"),
+    ):
+        dom_id = (
+            f"dom_{domain_slug}"
+            if user_id == "usr_default"
+            else f"dom_{domain_slug}_{user_id}"
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_domains (id, user_id, slug, name, description, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (dom_id, user_id, domain_slug, domain_name, domain_desc, 0 if domain_slug == "investing" else 1),
+        )
         fld_id = (
             f"fld_{domain_slug}_core"
             if user_id == "usr_default"
@@ -171,8 +199,8 @@ def seed_user_defaults(conn: sqlite3.Connection, user_id: str) -> None:
         )
         conn.execute(
             """
-            INSERT OR IGNORE INTO domain_folders (id, user_id, domain_slug, folder_name, is_system)
-            VALUES (?, ?, ?, '核心认知', 1)
+            INSERT OR IGNORE INTO domain_folders (id, user_id, domain_slug, folder_name, parent_id, is_system)
+            VALUES (?, ?, ?, '核心认知', NULL, 1)
             """,
             (fld_id, user_id, domain_slug),
         )

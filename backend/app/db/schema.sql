@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS crystallized_nodes (
     title               TEXT NOT NULL,
     atomic_claim        TEXT NOT NULL,
     payload_json        TEXT NOT NULL,
+    rich_blocks_json    TEXT NOT NULL DEFAULT '[]',
     confidence          REAL NOT NULL DEFAULT 0.6,
     conversion_weight   REAL NOT NULL DEFAULT 0.5,
     status              TEXT NOT NULL DEFAULT 'active',
@@ -153,12 +154,25 @@ CREATE TABLE IF NOT EXISTS socratic_logs (
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS user_domains (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL DEFAULT 'usr_default',
+    slug            TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    description     TEXT DEFAULT '',
+    color           TEXT DEFAULT 'indigo',
+    sort_order      INTEGER DEFAULT 0,
+    is_archived     INTEGER DEFAULT 0,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, slug)
+);
+
 CREATE TABLE IF NOT EXISTS domain_folders (
     id              TEXT PRIMARY KEY,
     user_id         TEXT NOT NULL DEFAULT 'usr_default',
     domain_slug     TEXT NOT NULL,
     folder_name     TEXT NOT NULL,
+    parent_id       TEXT DEFAULT NULL,
     is_system       INTEGER NOT NULL DEFAULT 0,
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, domain_slug, folder_name)
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

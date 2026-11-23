@@ -206,7 +206,11 @@ def approve_proposal(proposal_id: str, user_id: str = "usr_default") -> dict[str
             to_version = int(evo_data["to_version"])
             to_schema = evo_data["to_schema"]
             domain_slug = prop["domain_slug"]
-            domain_name = "个人投资与决策" if domain_slug == "investing" else "教育学习"
+            dom_row = conn.execute(
+                "SELECT name FROM user_domains WHERE user_id = ? AND slug = ?",
+                (user_id, domain_slug),
+            ).fetchone()
+            domain_name = dom_row["name"] if dom_row else domain_slug
 
             conn.execute(
                 "UPDATE domain_schemas SET is_active = 0 WHERE user_id = ? AND domain_slug = ?",

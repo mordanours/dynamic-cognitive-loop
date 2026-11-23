@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -17,22 +16,24 @@ router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 
 class DistillRequest(BaseModel):
     stream_id: str
-    domain_slug: Literal["investing", "learning"] | None = None
+    domain_slug: str | None = None
 
 
 class CreateFolderRequest(BaseModel):
-    domain_slug: Literal["investing", "learning"]
+    domain_slug: str
     folder_name: str = Field(..., min_length=1, max_length=32)
+    parent_id: str | None = None
 
 
 class RenameFolderRequest(BaseModel):
-    domain_slug: Literal["investing", "learning"]
+    domain_slug: str
+    folder_id: str | None = None
     old_name: str = Field(..., min_length=1, max_length=32)
     new_name: str = Field(..., min_length=1, max_length=32)
 
 
 class MoveNodeFolderRequest(BaseModel):
-    folder_name: str = Field(..., min_length=1, max_length=32)
+    folder_name: str = Field(..., min_length=1, max_length=80)
 
 
 @router.post("/distill")
@@ -75,6 +76,10 @@ def list_nodes(
     for r in rows:
         d = dict(r)
         d["payload"] = json.loads(d["payload_json"])
+        try:
+            d["rich_blocks"] = json.loads(d.get("rich_blocks_json") or "[]")
+        except Exception:
+            d["rich_blocks"] = []
         result.append(d)
     return result
 
@@ -103,12 +108,12 @@ def list_folders(
     with get_conn() as conn:
         if domain_slug:
             rows = conn.execute(
-                "SELECT * FROM domain_folders WHERE user_id = ? AND domain_slug = ? ORDER BY is_system DESC, created_at ASC",
+                "SELECT * FROM domain_folders WHERE user_id = ? AND domain_slug = ? ORDER BY is_system DESC, parent_id IS NOT NULL, created_at ASC",
                 (user_id, domain_slug),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM domain_folders WHERE user_id = ? ORDER BY domain_slug, is_system DESC, created_at ASC",
+                "SELECT * FROM domain_folders WHERE user_id = ? ORDER BY domain_slug, is_system DESC, parent_id IS NOT NULL, created_at ASC",
                 (user_id,),
             ).fetchall()
     return [dict(r) for r in rows]
@@ -124,16 +129,27 @@ def create_folder(
     if not clean_name:
         raise HTTPException(status_code=400, detail="目录名不能为空")
     with get_conn() as conn:
+        if req.parent_id:
+            parent = conn.execute(
+                "SELECT * FROM domain_folders WHERE id = ? AND user_id = ? AND domain_slug = ?",
+                (req.parent_id, user_id, req.domain_slug),
+            ).fetchone()
+            if not parent:
+                raise HTTPException(status_code=404, detail="未找到父级目录")
+            if parent["parent_id"] is not None:
+                raise HTTPException(status_code=400, detail="仅支持固定两级目录，不能在二级目录下继续建目录")
+
         exists = conn.execute(
-            "SELECT id FROM domain_folders WHERE user_id = ? AND domain_slug = ? AND folder_name = ?",
-            (user_id, req.domain_slug, clean_name),
+            "SELECT id FROM domain_folders WHERE user_id = ? AND domain_slug = ? AND folder_name = ? AND COALESCE(parent_id, '') = ?",
+            (user_id, req.domain_slug, clean_name, req.parent_id or ""),
         ).fetchone()
         if exists:
-            raise HTTPException(status_code=400, detail=f"目录 '{clean_name}' 已存在")
+            raise HTTPException(status_code=400, detail=f"同级目录下 '{clean_name}' 已存在")
+
         fid = new_id("fld")
         conn.execute(
-            "INSERT INTO domain_folders (id, user_id, domain_slug, folder_name, is_system) VALUES (?, ?, ?, ?, 0)",
-            (fid, user_id, req.domain_slug, clean_name),
+            "INSERT INTO domain_folders (id, user_id, domain_slug, folder_name, parent_id, is_system) VALUES (?, ?, ?, ?, ?, 0)",
+            (fid, user_id, req.domain_slug, clean_name, req.parent_id),
         )
         row = conn.execute("SELECT * FROM domain_folders WHERE id = ?", (fid,)).fetchone()
     return dict(row)
@@ -151,17 +167,53 @@ def rename_folder(
         raise HTTPException(status_code=400, detail="系统固定目录「核心认知」不可重命名")
     if not new_clean:
         raise HTTPException(status_code=400, detail="新目录名不能为空")
+
     with get_conn() as conn:
+        if req.folder_id:
+            target = conn.execute(
+                "SELECT * FROM domain_folders WHERE id = ? AND user_id = ?",
+                (req.folder_id, user_id),
+            ).fetchone()
+        else:
+            target = conn.execute(
+                "SELECT * FROM domain_folders WHERE user_id = ? AND domain_slug = ? AND folder_name = ?",
+                (user_id, req.domain_slug, old_clean),
+            ).fetchone()
+
+        if not target or target["is_system"] == 1:
+            raise HTTPException(status_code=400, detail="目录不存在或不可重命名")
+
         conn.execute(
-            "UPDATE domain_folders SET folder_name = ? WHERE user_id = ? AND domain_slug = ? AND folder_name = ? AND is_system = 0",
-            (new_clean, user_id, req.domain_slug, old_clean),
+            "UPDATE domain_folders SET folder_name = ? WHERE id = ? AND user_id = ?",
+            (new_clean, target["id"], user_id),
         )
-        old_path = f"{req.domain_slug}/{old_clean}"
-        new_path = f"{req.domain_slug}/{new_clean}"
-        conn.execute(
-            "UPDATE crystallized_nodes SET folder_path = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND folder_path = ?",
-            (new_path, user_id, old_path),
-        )
+
+        # Update crystallized_nodes.folder_path cleanly for level-1 or level-2 folder
+        if target["parent_id"]:
+            parent = conn.execute(
+                "SELECT folder_name FROM domain_folders WHERE id = ?", (target["parent_id"],)
+            ).fetchone()
+            prefix = f"{req.domain_slug}/{parent['folder_name']}/" if parent else f"{req.domain_slug}/"
+            conn.execute(
+                "UPDATE crystallized_nodes SET folder_path = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND folder_path = ?",
+                (prefix + new_clean, user_id, prefix + old_clean),
+            )
+        else:
+            old_prefix = f"{req.domain_slug}/{old_clean}"
+            new_prefix = f"{req.domain_slug}/{new_clean}"
+            conn.execute(
+                "UPDATE crystallized_nodes SET folder_path = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND folder_path = ?",
+                (new_prefix, user_id, old_prefix),
+            )
+            conn.execute(
+                """
+                UPDATE crystallized_nodes
+                SET folder_path = ? || substr(folder_path, length(?) + 1),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND folder_path LIKE ?
+                """,
+                (new_prefix + "/", old_prefix + "/", user_id, old_prefix + "/%"),
+            )
     return {"domain_slug": req.domain_slug, "old_name": old_clean, "new_name": new_clean}
 
 
@@ -172,7 +224,9 @@ def move_node_folder(
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     user_id = current_user["id"]
-    clean_folder = req.folder_name.strip().replace("/", "_")
+    rel_parts = [p.strip() for p in req.folder_name.strip("/").split("/") if p.strip()][:2]
+    if not rel_parts:
+        rel_parts = ["核心认知"]
     with get_conn() as conn:
         node = conn.execute(
             "SELECT * FROM crystallized_nodes WHERE id = ? AND user_id = ?",
@@ -180,11 +234,7 @@ def move_node_folder(
         ).fetchone()
         if not node:
             raise HTTPException(status_code=404, detail="未找到卡片")
-        conn.execute(
-            "INSERT OR IGNORE INTO domain_folders (id, user_id, domain_slug, folder_name, is_system) VALUES (?, ?, ?, ?, 0)",
-            (new_id("fld"), user_id, node["domain_slug"], clean_folder),
-        )
-        new_path = f"{node['domain_slug']}/{clean_folder}"
+        new_path = f"{node['domain_slug']}/{'/'.join(rel_parts)}"
         conn.execute(
             "UPDATE crystallized_nodes SET folder_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
             (new_path, node_id, user_id),

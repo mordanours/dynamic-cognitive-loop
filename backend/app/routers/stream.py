@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/api/stream", tags=["stream"])
 
 class CreateStreamRequest(BaseModel):
     raw_content: str = Field(..., min_length=5, description="原始对话记录或临时灵感")
-    domain_hint: Literal["investing", "learning"] = "investing"
+    domain_hint: str = "investing"
     source: str = "chat_paste"
     ttl_days: int = Field(default=7, ge=1, le=30)
 

@@ -9,9 +9,11 @@ import {
   RotateCcw,
   X,
 } from 'lucide-react';
-import { CrystallizedNode, DomainFolder, DomainSlug, NodeType } from '../api';
+import { CrystallizedNode, DomainFolder, NodeType, UserDomain } from '../api';
+import { RichMarkdown } from './RichMarkdown';
 
 interface Props {
+  domains: UserDomain[];
   nodes: CrystallizedNode[];
   folders: DomainFolder[];
   onStartSocratic: (nodeId: string) => void;
@@ -30,10 +32,14 @@ interface TreeNode3D {
   data?: CrystallizedNode;
 }
 
-const DOMAIN_NAMES: Record<DomainSlug, string> = {
-  investing: '个人投资与决策',
-  learning: '教育学习',
-};
+function fibonacciDir(index: number, total: number): [number, number, number] {
+  if (total <= 1) return [0.7, 0.4, 0.5];
+  const phi = Math.PI * (3 - Math.sqrt(5));
+  const y = 1 - (index / (total - 1)) * 2;
+  const r = Math.sqrt(Math.max(0, 1 - y * y));
+  const theta = phi * index;
+  return [Math.cos(theta) * r, y, Math.sin(theta) * r];
+}
 
 function sphericalOffset(
   baseX: number,
@@ -77,7 +83,7 @@ function sphericalOffset(
   return [(dx / dLen) * shellRadius, (dy / dLen) * shellRadius, (dz / dLen) * shellRadius];
 }
 
-export function SphericalTree3D({ nodes, folders, onStartSocratic, onProposeAction }: Props) {
+export function SphericalTree3D({ domains, nodes, folders, onStartSocratic, onProposeAction }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rotRef = useRef({ yaw: 0.45, pitch: 0.22, zoom: 1.0 });
   const dragRef = useRef<{ active: boolean; x: number; y: number; moved: boolean }>({
@@ -100,25 +106,21 @@ export function SphericalTree3D({ nodes, folders, onStartSocratic, onProposeActi
 
     list.push({ id: 'root', label: '认知中枢', kind: 'root', x: 0, y: 0, z: 0, radius: 13 });
 
-    const domainDefs: { slug: DomainSlug; dir: [number, number, number] }[] = [
-      { slug: 'investing', dir: [-1, 0.25, 0.35] },
-      { slug: 'learning', dir: [1, -0.2, -0.35] },
-    ];
-
     const filtered = nodes.filter((n) => {
       const nt: NodeType = n.node_type === 'knowledge' ? 'knowledge' : 'decision';
       return typeFilter === 'all' || nt === typeFilter;
     });
 
-    for (const dom of domainDefs) {
-      const len = Math.hypot(...dom.dir);
-      const dx = (dom.dir[0] / len) * 105;
-      const dy = (dom.dir[1] / len) * 105;
-      const dz = (dom.dir[2] / len) * 105;
+    domains.forEach((dom, dIdx) => {
+      const dir = fibonacciDir(dIdx, domains.length);
+      const len = Math.hypot(...dir) || 1;
+      const dx = (dir[0] / len) * 105;
+      const dy = (dir[1] / len) * 105;
+      const dz = (dir[2] / len) * 105;
       const domId = `dom_${dom.slug}`;
       list.push({
         id: domId,
-        label: DOMAIN_NAMES[dom.slug],
+        label: dom.name,
         kind: 'domain',
         x: dx,
         y: dy,
@@ -128,16 +130,25 @@ export function SphericalTree3D({ nodes, folders, onStartSocratic, onProposeActi
       });
       linkList.push({ from: 'root', to: domId });
 
-      // Collect subfolders for this domain
-      const folderSet = new Set<string>(['核心认知']);
-      folders.filter((f) => f.domain_slug === dom.slug).forEach((f) => folderSet.add(f.folder_name));
+      // Collect 1st/2nd-level folder paths for this domain
+      const domFolders = folders.filter((f) => f.domain_slug === dom.slug);
+      const byId = new Map(domFolders.map((f) => [f.id, f.folder_name]));
+      const pathSet = new Set<string>(['核心认知']);
+      domFolders.forEach((f) => {
+        if (f.parent_id && byId.has(f.parent_id)) {
+          pathSet.add(`${byId.get(f.parent_id)}/${f.folder_name}`);
+        } else {
+          pathSet.add(f.folder_name);
+        }
+      });
+
       const domNodes = filtered.filter((n) => n.domain_slug === dom.slug);
       domNodes.forEach((n) => {
         const sub = (n.folder_path || `${dom.slug}/核心认知`).split('/').slice(1).join('/') || '核心认知';
-        folderSet.add(sub);
+        pathSet.add(sub);
       });
 
-      const subList = Array.from(folderSet);
+      const subList = Array.from(pathSet);
       subList.forEach((sub, sIdx) => {
         const [fx, fy, fz] = sphericalOffset(dx, dy, dz, sIdx, subList.length, 195, 0.58);
         const fId = `fld_${dom.slug}_${sub}`;
@@ -175,10 +186,10 @@ export function SphericalTree3D({ nodes, folders, onStartSocratic, onProposeActi
           linkList.push({ from: fId, to: leaf.id });
         });
       });
-    }
+    });
 
     return { treeNodes: list, edges: linkList };
-  }, [nodes, folders, typeFilter]);
+  }, [domains, nodes, folders, typeFilter]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -477,17 +488,23 @@ export function SphericalTree3D({ nodes, folders, onStartSocratic, onProposeActi
           <h3 className="mt-1 text-sm font-semibold text-white">{selectedNode.title}</h3>
 
           <div className="mt-2.5 flex-1 space-y-2.5 overflow-y-auto text-xs">
-            <p className="rounded-xl bg-slate-950 p-3 leading-relaxed text-slate-200">
-              {selectedNode.atomic_claim}
-            </p>
+            <div className="rounded-xl bg-slate-950 p-3 text-slate-200">
+              <RichMarkdown content={selectedNode.atomic_claim} />
+            </div>
             <div className="space-y-1.5 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-[11px] text-slate-300">
               {Object.entries(selectedNode.payload).map(([k, v]) => (
                 <div key={k}>
                   <span className="font-medium text-slate-400">{k}: </span>
-                  <span>{typeof v === 'string' ? v : JSON.stringify(v)}</span>
+                  <RichMarkdown content={typeof v === 'string' ? v : JSON.stringify(v)} />
                 </div>
               ))}
             </div>
+            {(selectedNode.rich_blocks || []).map((rb, idx) => (
+              <div key={idx} className="rounded-xl border border-indigo-500/20 bg-slate-950/80 p-3">
+                <div className="mb-1 text-[11px] font-semibold text-indigo-300">{rb.title}</div>
+                <RichMarkdown content={rb.markdown} />
+              </div>
+            ))}
           </div>
 
           <div className="mt-3 flex gap-2 border-t border-slate-800 pt-3">

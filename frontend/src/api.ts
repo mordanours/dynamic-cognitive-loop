@@ -1,7 +1,22 @@
-export type DomainSlug = 'investing' | 'learning';
+export type DomainSlug = string;
 export type NodeType = 'knowledge' | 'decision';
 export type Bandwidth = 'low' | 'medium' | 'high';
 export type ProviderType = 'deepseek' | 'openai_compatible' | 'local';
+
+export interface UserDomain {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  color: string;
+  sort_order: number;
+  is_archived: number;
+}
+
+export interface RichBlock {
+  title: string;
+  markdown: string;
+}
 
 export interface StreamItem {
   id: string;
@@ -23,6 +38,7 @@ export interface CrystallizedNode {
   title: string;
   atomic_claim: string;
   payload: Record<string, unknown>;
+  rich_blocks?: RichBlock[];
   confidence: number;
   conversion_weight: number;
   status: string;
@@ -172,6 +188,7 @@ export interface DomainFolder {
   id: string;
   domain_slug: DomainSlug;
   folder_name: string;
+  parent_id?: string | null;
   is_system: number;
   created_at: string;
 }
@@ -337,19 +354,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ node_id, question, user_answer, difficulty }),
     }),
+  listDomains: () => req<UserDomain[]>('/api/domains'),
+  createDomain: (name: string, description = '', color = 'indigo') =>
+    req<UserDomain>('/api/domains', {
+      method: 'POST',
+      body: JSON.stringify({ name, description, color }),
+    }),
+  updateDomain: (slug: string, payload: { name?: string; description?: string; is_archived?: number }) =>
+    req<UserDomain>(`/api/domains/${slug}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   listFolders: (domain_slug?: DomainSlug) =>
     req<DomainFolder[]>(
       domain_slug ? `/api/nodes/folders?domain_slug=${domain_slug}` : '/api/nodes/folders',
     ),
-  createFolder: (domain_slug: DomainSlug, folder_name: string) =>
+  createFolder: (domain_slug: DomainSlug, folder_name: string, parent_id?: string | null) =>
     req<DomainFolder>('/api/nodes/folders', {
       method: 'POST',
-      body: JSON.stringify({ domain_slug, folder_name }),
+      body: JSON.stringify({ domain_slug, folder_name, parent_id: parent_id || null }),
     }),
-  renameFolder: (domain_slug: DomainSlug, old_name: string, new_name: string) =>
+  renameFolder: (domain_slug: DomainSlug, old_name: string, new_name: string, folder_id?: string) =>
     req<{ domain_slug: DomainSlug; old_name: string; new_name: string }>('/api/nodes/folders', {
       method: 'PATCH',
-      body: JSON.stringify({ domain_slug, old_name, new_name }),
+      body: JSON.stringify({ domain_slug, old_name, new_name, folder_id }),
     }),
   moveNodeFolder: (node_id: string, folder_name: string) =>
     req<{ id: string; folder_path: string }>(`/api/nodes/${node_id}/folder`, {
