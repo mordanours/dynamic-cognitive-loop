@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { FileText, Image as ImageIcon } from 'lucide-react';
 import { getStoredToken } from '../api';
 
@@ -37,8 +38,8 @@ export function AuthImage({ fileId, filename, isImage }: Props) {
 
   if (!isImage) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-[11px] text-slate-300">
-        <FileText className="h-3 w-3 text-indigo-400" />
+      <span className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-paper-2 px-2.5 py-1 text-xs font-semibold text-ink-soft">
+        <FileText className="h-3.5 w-3.5 text-clay-600" />
         {filename}
       </span>
     );
@@ -49,25 +50,38 @@ export function AuthImage({ fileId, filename, isImage }: Props) {
       <button
         type="button"
         onClick={() => blobUrl && setZoomed(true)}
-        className="group relative overflow-hidden rounded-xl border border-slate-800 bg-slate-950"
+        className="group relative overflow-hidden rounded-2xl border border-line bg-paper-2 shadow-soft"
       >
         {blobUrl ? (
-          <img src={blobUrl} alt={filename} className="h-24 w-32 object-cover transition group-hover:scale-105" />
+          <img src={blobUrl} alt={filename} className="h-24 w-32 object-cover transition duration-300 group-hover:scale-105" />
         ) : (
-          <div className="flex h-24 w-32 items-center justify-center text-slate-500">
+          <div className="flex h-24 w-32 items-center justify-center text-ink-faint">
             <ImageIcon className="h-5 w-5" />
           </div>
         )}
       </button>
 
-      {zoomed && blobUrl && (
-        <div
-          onClick={() => setZoomed(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
-        >
-          <img src={blobUrl} alt={filename} className="max-h-[90vh] max-w-full rounded-xl shadow-2xl" />
-        </div>
-      )}
+      <AnimatePresence>
+        {zoomed && blobUrl && (
+          <motion.div
+            onClick={() => setZoomed(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-ink/70 p-4 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.img
+              src={blobUrl}
+              alt={filename}
+              className="max-h-[90vh] max-w-full rounded-2xl shadow-pop"
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

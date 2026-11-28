@@ -1,23 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
-  Activity,
   ArrowLeft,
   BarChart3,
-  BookOpen,
-  Brain,
   CheckCircle2,
   ChevronRight,
-  Compass,
   Folder,
   FolderPlus,
   Globe,
   GraduationCap,
   LayoutGrid,
-  Loader2,
+  Leaf,
   LogOut,
+  Moon,
   Pencil,
   Plus,
   Settings,
+  Sprout,
+  Sun,
+  TreeDeciduous,
+  X,
   Zap,
 } from 'lucide-react';
 import {
@@ -39,14 +41,30 @@ import {
 } from './api';
 import { ArchitectPanel } from './components/ArchitectPanel';
 import { AuditModal } from './components/AuditModal';
-import { AuthImage } from './components/AuthImage';
 import { AuthScreen } from './components/AuthScreen';
-import { RichMarkdown } from './components/RichMarkdown';
+import { ActionCard, NodeCard } from './components/Cards';
 import { SettingsModal } from './components/SettingsModal';
 import { SocraticModal } from './components/SocraticModal';
 import { SphericalTree3D } from './components/SphericalTree3D';
 import { StreamFab } from './components/StreamFab';
+import { AnimatedNumber, GrowthSprout, LivingBackground, rise, Segmented, stagger } from './components/ui/Living';
+import { Logo } from './components/ui/Logo';
+import { IconBadge } from './components/ui/Modal';
 import { useIsMobile } from './hooks/useIsMobile';
+
+/** Rotating soft accent per domain so the grid feels like a garden, not a spreadsheet. */
+const DOMAIN_TONES = [
+  { badge: 'bg-leaf-50 text-leaf-600', bar: 'bg-leaf-400' },
+  { badge: 'bg-clay-50 text-clay-600', bar: 'bg-clay-300' },
+  { badge: 'bg-mind-50 text-mind-600', bar: 'bg-mind-300' },
+  { badge: 'bg-sun-50 text-sun-600', bar: 'bg-sun-300' },
+];
+
+const BANDWIDTH_META: Record<Bandwidth, { label: string; hint: string; icon: typeof Moon }> = {
+  low: { label: 'Low', hint: '休眠 · 只留一件事', icon: Moon },
+  medium: { label: 'Med', hint: '生长 · 标准视图', icon: Sprout },
+  high: { label: 'High', hint: '繁茂 · 全部信息', icon: Sun },
+};
 
 export function App() {
   const isMobile = useIsMobile();
@@ -84,6 +102,10 @@ export function App() {
   const [auditTarget, setAuditTarget] = useState<ActionExperiment | null>(null);
   const [socraticNodeId, setSocraticNodeId] = useState<string | null>(null);
 
+  // Freshly crystallized cards (ids that appeared since the previous refresh) get a short glow.
+  const knownNodeIds = useRef<Set<string> | null>(null);
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
+
   const clearSessionState = useCallback(() => {
     setStoredToken(null);
     setUser(null);
@@ -98,6 +120,7 @@ export function App() {
     setSelectedDomain(null);
     setSelectedFolderPath(null);
     setBanner(null);
+    knownNodeIds.current = null;
   }, []);
 
   const refreshAll = useCallback(async () => {
@@ -124,6 +147,18 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const ids = new Set(nodes.map((n) => n.id));
+    const prev = knownNodeIds.current;
+    knownNodeIds.current = ids;
+    if (!prev || prev.size === 0) return; // initial load: nothing is "new"
+    const added = new Set([...ids].filter((id) => !prev.has(id)));
+    if (added.size === 0) return;
+    setFreshIds(added);
+    const t = window.setTimeout(() => setFreshIds(new Set()), 2600);
+    return () => window.clearTimeout(t);
+  }, [nodes]);
+
+  useEffect(() => {
     setUnauthorizedHandler(clearSessionState);
     const token = getStoredToken();
     if (!token) {
@@ -141,6 +176,13 @@ export function App() {
     if (!user) return;
     refreshAll().catch((e) => setBanner({ type: 'err', text: e.message }));
   }, [user, refreshAll]);
+
+  // Auto-dismiss success banners
+  useEffect(() => {
+    if (banner?.type !== 'ok') return;
+    const t = window.setTimeout(() => setBanner(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [banner]);
 
   const handleBandwidthChange = async (next: Bandwidth) => {
     setBandwidth(next);
@@ -226,10 +268,14 @@ export function App() {
   );
 
   const selectedDomainObj = domains.find((d) => d.slug === selectedDomain) || null;
+  const lowEnergy = bandwidth === 'low';
 
   if (!authChecked) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-xs text-slate-400">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-paper text-sm text-ink-muted">
+        <div className="animate-breathe">
+          <Logo size={56} />
+        </div>
         正在校验登录状态...
       </div>
     );
@@ -239,44 +285,58 @@ export function App() {
     return <AuthScreen onAuthenticated={(u) => setUser(u)} />;
   }
 
+  const goHome = () => {
+    setViewMode('workspace');
+    setSelectedDomain(null);
+    setSelectedFolderPath(null);
+  };
+
+  const folderRowClass = (active: boolean) =>
+    `flex flex-1 items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm transition ${
+      active ? 'bg-leaf-50 font-bold text-leaf-700' : 'text-ink-soft hover:bg-paper-2 hover:text-ink'
+    }`;
+
   return (
-    <div className={`min-h-screen bg-slate-950 text-slate-100 ${isMobile ? 'pb-24' : 'pb-16'}`}>
-      {/* Adaptive Header: Minimal on Mobile, Full Cockpit on Desktop */}
-      <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur">
+    <div className={`relative isolate min-h-screen text-ink ${isMobile ? 'pb-28' : 'pb-16'}`}>
+      <LivingBackground still={lowEnergy} />
+
+      {/* Header */}
+      <header className="sticky top-0 z-30 border-b border-line/80 bg-paper/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-4 py-2.5 sm:py-3">
-          <button
-            onClick={() => {
-              setViewMode('workspace');
-              setSelectedDomain(null);
-              setSelectedFolderPath(null);
-            }}
-            className="flex items-center gap-2 text-left"
-          >
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600/20 text-indigo-400 sm:h-9 sm:w-9">
-              <Brain className="h-4 w-4 sm:h-5 sm:w-5" />
-            </div>
+          <button onClick={goHome} className="group flex items-center gap-2.5 text-left">
+            <motion.div whileHover={{ rotate: -8, scale: 1.06 }} transition={{ type: 'spring', stiffness: 400 }}>
+              <Logo size={isMobile ? 34 : 40} animated={!lowEnergy} />
+            </motion.div>
             <div>
-              <h1 className="text-sm font-bold tracking-tight text-white">Cognitive Loop</h1>
-              {!isMobile && <p className="text-[11px] text-slate-400">Agentic PKM · 动态认知闭环</p>}
+              <h1 className="text-base leading-tight font-extrabold tracking-tight whitespace-nowrap text-ink">Cognitive Loop</h1>
+              {!isMobile && (
+                <p className="hidden text-xs font-semibold whitespace-nowrap text-ink-muted xl:block">动态认知闭环</p>
+              )}
             </div>
           </button>
 
-          {/* Desktop Metrics Pill */}
+          {/* Desktop metrics pill */}
           {!isMobile && metrics && (
-            <div className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-1.5 text-xs">
-              <div>
-                <span className="text-slate-400">DCR </span>
-                <span className="font-bold text-emerald-400">{metrics.dcr_percent}%</span>
+            <div className="hidden items-center gap-3 rounded-2xl border border-line bg-surface px-3 py-1 shadow-soft lg:flex">
+              <div className="flex items-center gap-1.5" title="决策转化率 DCR">
+                <GrowthSprout value={metrics.dcr_percent} size={30} still={lowEnergy} />
+                <div className="leading-tight">
+                  <div className="text-[0.7rem] font-bold whitespace-nowrap text-ink-muted">DCR</div>
+                  <AnimatedNumber value={metrics.dcr_percent} suffix="%" className="text-sm font-extrabold text-leaf-700" />
+                </div>
               </div>
-              <div className="h-3 w-px bg-slate-800" />
-              <div>
-                <span className="text-slate-400">压缩比 </span>
-                <span className="font-bold text-indigo-300">{metrics.avg_compression_ratio}:1</span>
+              <div className="h-6 w-px bg-line" />
+              <div className="leading-tight">
+                <div className="text-[0.7rem] font-bold whitespace-nowrap text-ink-muted">压缩比</div>
+                <span className="text-sm font-extrabold text-mind-700">
+                  <AnimatedNumber value={metrics.avg_compression_ratio} decimals={1} />
+                  :1
+                </span>
               </div>
-              <div className="h-3 w-px bg-slate-800" />
-              <div>
-                <span className="text-slate-400">已验证 </span>
-                <span className="font-bold text-slate-200">
+              <div className="h-6 w-px bg-line" />
+              <div className="leading-tight">
+                <div className="text-[0.7rem] font-bold whitespace-nowrap text-ink-muted">已验证</div>
+                <span className="text-sm font-extrabold text-ink">
                   {metrics.actions_verified}/{metrics.nodes_total}
                 </span>
               </div>
@@ -285,717 +345,626 @@ export function App() {
 
           {/* Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {!isMobile && bandwidth !== 'low' && (
-              <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-0.5 text-xs">
-                <button
-                  onClick={() => setViewMode('workspace')}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-medium transition ${
-                    viewMode === 'workspace' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                  工作台
-                </button>
-                <button
-                  onClick={() => setViewMode('tree3d')}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-medium transition ${
-                    viewMode === 'tree3d' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Globe className="h-3.5 w-3.5" />
-                  3D 知识树
-                </button>
-              </div>
+            {!isMobile && !lowEnergy && (
+              <Segmented
+                group="view"
+                value={viewMode === 'tree3d' ? 'tree3d' : 'workspace'}
+                onChange={(v) => setViewMode(v)}
+                options={[
+                  { value: 'workspace', label: <><LayoutGrid className="h-4 w-4" />工作台</> },
+                  { value: 'tree3d', label: <><TreeDeciduous className="h-4 w-4" />知识树</> },
+                ]}
+              />
             )}
 
-            {!isMobile && bandwidth !== 'low' && dueSocraticNodes.length > 0 && (
-              <button
+            {!isMobile && !lowEnergy && dueSocraticNodes.length > 0 && (
+              <motion.button
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
                 onClick={() => setSocraticNodeId(dueSocraticNodes[0].id)}
-                className="flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-500/20"
+                className="btn btn-soft-mind btn-sm"
               >
-                <GraduationCap className="h-3.5 w-3.5" />
-                陪练 ({dueSocraticNodes.length})
-              </button>
+                <GraduationCap className="h-4 w-4" />
+                陪练
+                <span className="rounded-full bg-mind-600 px-1.5 text-xs text-white">{dueSocraticNodes.length}</span>
+              </motion.button>
             )}
 
-            {/* Bandwidth Toggle */}
-            <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-0.5 text-[11px] sm:text-xs">
-              {(['low', 'medium', 'high'] as Bandwidth[]).map((b) => (
-                <button
-                  key={b}
-                  onClick={() => handleBandwidthChange(b)}
-                  className={`rounded-lg px-2 py-1 font-medium transition sm:px-2.5 ${
-                    bandwidth === b
-                      ? b === 'low'
-                        ? 'bg-amber-500/20 text-amber-300'
-                        : 'bg-indigo-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {b === 'low' ? 'Low' : b === 'medium' ? 'Med' : 'High'}
-                </button>
-              ))}
-            </div>
+            {/* Energy (bandwidth) toggle */}
+            <Segmented
+              group="bandwidth"
+              size={isMobile ? 'sm' : 'md'}
+              value={bandwidth}
+              onChange={(b) => handleBandwidthChange(b)}
+              options={(['low', 'medium', 'high'] as Bandwidth[]).map((b) => {
+                const Icon = BANDWIDTH_META[b].icon;
+                return {
+                  value: b,
+                  activeClass: b === 'low' ? '!bg-sun-100' : '',
+                  label: (
+                    <span
+                      title={BANDWIDTH_META[b].hint}
+                      aria-label={`${BANDWIDTH_META[b].label} · ${BANDWIDTH_META[b].hint}`}
+                      className="inline-flex items-center gap-1"
+                    >
+                      <Icon className={`h-4 w-4 ${bandwidth === b ? (b === 'low' ? 'text-sun-700' : 'text-leaf-600') : ''}`} />
+                      {!isMobile && BANDWIDTH_META[b].label}
+                    </span>
+                  ),
+                };
+              })}
+            />
 
-            <button
-              onClick={() => setSettingsOpen(true)}
-              title="模型设置"
-              className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900 p-1.5 text-xs text-slate-300 hover:border-slate-700 hover:text-white sm:px-3"
-            >
-              <Settings className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-              {!isMobile && <span>模型设置</span>}
+            <button onClick={() => setSettingsOpen(true)} title="模型设置" className="icon-btn sm:!px-3">
+              <Settings className="h-[18px] w-[18px]" />
+              {!isMobile && <span className="ml-1.5 hidden text-sm font-bold whitespace-nowrap xl:inline">模型设置</span>}
             </button>
 
             <button
               onClick={clearSessionState}
               title={`退出登录 (${user.nickname})`}
-              className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900 p-1.5 text-xs text-slate-400 hover:border-rose-500/40 hover:text-rose-300 sm:px-2.5"
+              className="icon-btn hover:!bg-coral-50 hover:!text-coral-700 sm:!px-2.5"
             >
-              <LogOut className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-              {!isMobile && <span>{user.nickname}</span>}
+              {!isMobile && (
+                <span className="mr-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-clay-100 text-xs font-extrabold text-clay-700">
+                  {(user.nickname || '?').slice(0, 1).toUpperCase()}
+                </span>
+              )}
+              <LogOut className="h-[18px] w-[18px]" />
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-5">
-        {banner && (
-          <div
-            className={`mb-4 flex items-center justify-between rounded-xl border px-4 py-2.5 text-xs ${
-              banner.type === 'ok'
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                : 'border-rose-500/30 bg-rose-500/10 text-rose-200'
-            }`}
-          >
-            <span>{banner.text}</span>
-            <button onClick={() => setBanner(null)} className="ml-4 shrink-0 text-slate-400 hover:text-white">
-              关闭
-            </button>
-          </div>
-        )}
+      <main className="mx-auto max-w-6xl px-4 py-6">
+        <AnimatePresence>
+          {banner && (
+            <motion.div
+              key={banner.text}
+              initial={{ opacity: 0, y: -10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+              className={`mb-5 flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm shadow-soft ${
+                banner.type === 'ok'
+                  ? 'border-leaf-100 bg-leaf-50 text-leaf-800'
+                  : 'border-coral-100 bg-coral-50 text-coral-700'
+              }`}
+              role="status"
+            >
+              <span className="flex items-center gap-2">
+                {banner.type === 'ok' ? <Leaf className="h-4 w-4 shrink-0" /> : <Zap className="h-4 w-4 shrink-0" />}
+                {banner.text}
+              </span>
+              <button onClick={() => setBanner(null)} className="icon-btn shrink-0" aria-label="关闭">
+                <X className="h-4 w-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* MOBILE METRICS TAB */}
-        {isMobile && viewMode === 'metrics' ? (
-          <div className="space-y-4">
-            <h2 className="text-base font-semibold text-white">认知转化指标与数据概览</h2>
-            {metrics && (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-                  <div className="text-xs text-slate-400">决策转化率 (DCR)</div>
-                  <div className="mt-1 text-2xl font-bold text-emerald-400">{metrics.dcr_percent}%</div>
-                </div>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-                  <div className="text-xs text-slate-400">认知压缩比</div>
-                  <div className="mt-1 text-2xl font-bold text-indigo-300">{metrics.avg_compression_ratio}:1</div>
-                </div>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-                  <div className="text-xs text-slate-400">活跃结晶节点</div>
-                  <div className="mt-1 text-2xl font-bold text-white">{metrics.nodes_total}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-                  <div className="text-xs text-slate-400">已验证行动</div>
-                  <div className="mt-1 text-2xl font-bold text-emerald-300">{metrics.actions_verified}</div>
+        <AnimatePresence mode="wait">
+          {isMobile && viewMode === 'metrics' ? (
+            /* MOBILE METRICS TAB */
+            <motion.div key="metrics" {...pageFade} className="space-y-4">
+              <h2 className="text-xl font-extrabold text-ink">认知转化指标与数据概览</h2>
+              {metrics && (
+                <motion.div variants={stagger} initial="hidden" animate="show" className="grid grid-cols-2 gap-3">
+                  <motion.div variants={rise} className="card col-span-2 flex items-center gap-4 p-5">
+                    <GrowthSprout value={metrics.dcr_percent} size={64} />
+                    <div>
+                      <div className="text-sm font-bold text-ink-muted">决策转化率 (DCR)</div>
+                      <AnimatedNumber value={metrics.dcr_percent} suffix="%" className="text-4xl font-extrabold text-leaf-700" />
+                    </div>
+                  </motion.div>
+                  <motion.div variants={rise} className="card p-4">
+                    <div className="text-sm font-bold text-ink-muted">认知压缩比</div>
+                    <div className="mt-1 text-2xl font-extrabold text-mind-700">
+                      <AnimatedNumber value={metrics.avg_compression_ratio} decimals={1} />:1
+                    </div>
+                  </motion.div>
+                  <motion.div variants={rise} className="card p-4">
+                    <div className="text-sm font-bold text-ink-muted">活跃结晶节点</div>
+                    <AnimatedNumber value={metrics.nodes_total} className="mt-1 block text-2xl font-extrabold text-ink" />
+                  </motion.div>
+                  <motion.div variants={rise} className="card col-span-2 p-4">
+                    <div className="text-sm font-bold text-ink-muted">已验证行动</div>
+                    <AnimatedNumber value={metrics.actions_verified} className="mt-1 block text-2xl font-extrabold text-leaf-700" />
+                  </motion.div>
+                </motion.div>
+              )}
+            </motion.div>
+          ) : lowEnergy ? (
+            /* LOW BANDWIDTH MODE */
+            <motion.div key="low" {...pageFade} className="mx-auto max-w-xl py-6">
+              <div className="mb-5 flex items-center gap-3">
+                <IconBadge tone="sun" size="lg">
+                  <Moon className="h-5 w-5" />
+                </IconBadge>
+                <div>
+                  <div className="text-lg font-extrabold text-ink">休眠模式</div>
+                  <div className="text-sm text-ink-muted">低精力带宽 · 仅保留今日唯一行动</div>
                 </div>
               </div>
-            )}
-          </div>
-        ) : bandwidth === 'low' ? (
-          /* LOW BANDWIDTH MODE */
-          <div className="mx-auto max-w-xl py-6">
-            <div className="mb-4 flex items-center gap-2 text-amber-300">
-              <Zap className="h-4 w-4" />
-              <span className="text-xs font-medium tracking-wider">低精力带宽模式 · 仅保留今日唯一行动</span>
-            </div>
-            {activeActions.length > 0 ? (
-              <div className="rounded-2xl border border-amber-500/30 bg-slate-900 p-5 shadow-xl">
-                <div className="mb-1 text-xs text-slate-400">来自：{activeActions[0].node_title}</div>
-                <h2 className="text-base font-semibold text-white sm:text-lg">{activeActions[0].micro_action}</h2>
-                {activeActions[0].theoretical_basis && (
-                  <p className="mt-2 text-xs text-indigo-300/90">理论依据：{activeActions[0].theoretical_basis}</p>
-                )}
-                <div className="mt-3 rounded-xl bg-slate-950 p-3 text-xs text-slate-300">
-                  <div>
-                    <span className="text-amber-400">If 触发：</span>
-                    {activeActions[0].trigger_condition}
-                  </div>
-                  <div className="mt-1">
-                    <span className="text-emerald-400">标准：</span>
-                    {activeActions[0].success_metric}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setAuditTarget(activeActions[0])}
-                  className="mt-5 w-full rounded-xl bg-emerald-600 py-3 text-sm font-medium text-white hover:bg-emerald-500"
-                >
-                  完成并提交 1 分钟审计
-                </button>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center text-sm text-slate-400">
-                当前没有待执行的微行动。
-              </div>
-            )}
-          </div>
-        ) : viewMode === 'tree3d' ? (
-          /* 3D SPHERICAL KNOWLEDGE TREE */
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-base font-semibold text-white sm:text-lg">3D 球形知识树</h2>
-              <p className="mt-1 text-xs text-slate-400">
-                动态分布所有自定义领域与两级目录（青色=知识类名词，翠绿=决策类动词）。
-              </p>
-            </div>
-            <SphericalTree3D
-              domains={domains}
-              nodes={nodes}
-              folders={folders}
-              onStartSocratic={(id) => setSocraticNodeId(id)}
-              onProposeAction={handleProposeAction}
-            />
-          </div>
-        ) : !selectedDomain ? (
-          /* ROOT WORKSPACE: Custom Domains Grid */
-          <div className="space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+              {activeActions.length > 0 ? (
+                <ActionCard act={activeActions[0]} variant="hero" onAudit={() => setAuditTarget(activeActions[0])} />
+              ) : (
+                <EmptyState icon={<Moon className="h-6 w-6" />} tone="sun" text="当前没有待执行的微行动。好好休息。" />
+              )}
+            </motion.div>
+          ) : viewMode === 'tree3d' ? (
+            /* 3D SPHERICAL KNOWLEDGE TREE */
+            <motion.div key="tree" {...pageFade} className="space-y-4">
               <div>
-                <h2 className="text-base font-semibold text-white sm:text-lg">认知领域工作区</h2>
-                <p className="mt-0.5 text-xs text-slate-400">
-                  支持自由新增与重命名领域；首页仅展示待执行有效行动摘要。
+                <h2 className="text-xl font-extrabold text-ink sm:text-2xl">知识树</h2>
+                <p className="mt-1 text-sm text-ink-muted">
+                  领域是树干，目录是枝条，卡片是叶片——天青色叶为知识类（名词），叶绿色叶为决策类（动词）。
                 </p>
               </div>
-              <button
-                onClick={() => setAddingDomain((v) => !v)}
-                className="flex items-center gap-1.5 rounded-xl border border-indigo-500/40 bg-indigo-500/15 px-3.5 py-2 text-xs font-medium text-indigo-200 hover:bg-indigo-500/25"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                新建认知领域
-              </button>
-            </div>
-
-            {addingDomain && (
-              <div className="rounded-2xl border border-indigo-500/30 bg-slate-900 p-4 text-xs">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <input
-                    value={newDomainName}
-                    onChange={(e) => setNewDomainName(e.target.value)}
-                    placeholder="领域名称（如：AI 工程架构、健康管理）"
-                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500 sm:text-xs"
-                  />
-                  <input
-                    value={newDomainDesc}
-                    onChange={(e) => setNewDomainDesc(e.target.value)}
-                    placeholder="一句话描述（可选）"
-                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500 sm:text-xs"
-                  />
+              <SphericalTree3D
+                domains={domains}
+                nodes={nodes}
+                folders={folders}
+                onStartSocratic={(id) => setSocraticNodeId(id)}
+                onProposeAction={handleProposeAction}
+              />
+            </motion.div>
+          ) : !selectedDomain ? (
+            /* ROOT WORKSPACE: Custom Domains Grid */
+            <motion.div key="home" {...pageFade} className="space-y-6">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
+                    你好，{user.nickname || '园丁'}
+                    <motion.span
+                      className="ml-1.5 inline-block align-[-2px] text-leaf-500"
+                      style={{ originY: 1 }}
+                      animate={{ rotate: [0, 14, -6, 0] }}
+                      transition={{ duration: 1.6, delay: 0.4 }}
+                    >
+                      <Sprout className="h-6 w-6" />
+                    </motion.span>
+                  </h2>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    认知领域工作区 · 支持自由新增与重命名领域；首页仅展示待执行有效行动摘要。
+                  </p>
                 </div>
-                <div className="mt-3 flex justify-end gap-2">
-                  <button
-                    onClick={() => setAddingDomain(false)}
-                    className="rounded-lg px-3 py-1.5 text-slate-400 hover:text-white"
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if (!newDomainName.trim()) return;
-                      try {
-                        await api.createDomain(newDomainName.trim(), newDomainDesc.trim());
-                        setNewDomainName('');
-                        setNewDomainDesc('');
-                        setAddingDomain(false);
-                        await refreshAll();
-                      } catch (e) {
-                        setBanner({ type: 'err', text: (e as Error).message });
-                      }
-                    }}
-                    className="rounded-lg bg-indigo-600 px-4 py-1.5 font-medium text-white hover:bg-indigo-500"
-                  >
-                    创建领域
-                  </button>
-                </div>
+                <button onClick={() => setAddingDomain((v) => !v)} className="btn btn-primary btn-press">
+                  <Plus className="h-4 w-4" />
+                  新建认知领域
+                </button>
               </div>
-            )}
 
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              {domains.map((dom) => {
-                const dNodes = nodes.filter((n) => n.domain_slug === dom.slug);
-                const dActions = activeActions.filter((a) => a.domain_slug === dom.slug);
-                const knowledgeCount = dNodes.filter((n) => n.node_type === 'knowledge').length;
-                const decisionCount = dNodes.filter((n) => n.node_type !== 'knowledge').length;
-
-                return (
-                  <div
-                    key={dom.slug}
-                    className="flex flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900/70 p-5 transition hover:border-indigo-500/40"
+              <AnimatePresence>
+                {addingDomain && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
                   >
-                    <div>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-400">
-                            <Folder className="h-5 w-5" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <h3 className="text-base font-semibold text-white">{dom.name}</h3>
-                              <button
-                                title="重命名领域"
-                                onClick={async () => {
-                                  const next = window.prompt(`重命名领域「${dom.name}」为：`, dom.name);
-                                  if (!next || next.trim() === dom.name) return;
-                                  await api.updateDomain(dom.slug, { name: next.trim() });
-                                  await refreshAll();
-                                }}
-                                className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200"
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </button>
-                            </div>
-                            <p className="text-xs text-slate-400">{dom.description || '自定义认知领域'}</p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => {
-                            setSelectedDomain(dom.slug);
-                            setSelectedFolderPath(null);
-                            setTypeFilter('all');
-                          }}
-                          className="flex shrink-0 items-center gap-1 rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-slate-800"
-                        >
-                          进入
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </button>
+                    <div className="card border-leaf-100 p-4 sm:p-5">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <input
+                          value={newDomainName}
+                          onChange={(e) => setNewDomainName(e.target.value)}
+                          placeholder="领域名称（如：AI 工程架构、健康管理）"
+                          className="input"
+                          autoFocus
+                        />
+                        <input
+                          value={newDomainDesc}
+                          onChange={(e) => setNewDomainDesc(e.target.value)}
+                          placeholder="一句话描述（可选）"
+                          className="input"
+                        />
                       </div>
-
-                      <div className="mt-4 space-y-2">
-                        <div className="flex items-center justify-between text-[11px] font-medium text-slate-400">
-                          <span>待执行行动 ({dActions.length})</span>
-                          <span>
-                            知识 {knowledgeCount} · 决策 {decisionCount}
-                          </span>
-                        </div>
-                        {dActions.length > 0 ? (
-                          dActions.slice(0, 2).map((act) => (
-                            <div
-                              key={act.id}
-                              className="rounded-xl border border-emerald-500/20 bg-slate-950/90 p-3"
-                            >
-                              <div className="text-sm font-medium text-white sm:text-xs">{act.micro_action}</div>
-                              <div className="mt-1 text-xs text-slate-400 sm:text-[11px]">
-                                <span className="text-amber-400">If: </span>
-                                {act.trigger_condition}
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="rounded-xl border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">
-                            暂无待执行微行动，点右上角「进入」从结晶卡片生成。
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          /* DOMAIN DRILL-DOWN: 2-Level Folder Tree + Rich Cards */
-          <div className="space-y-5">
-            {/* Breadcrumb & Type Filter */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
-              <div className="flex flex-wrap items-center gap-1.5 text-sm">
-                <button
-                  onClick={() => {
-                    setSelectedDomain(null);
-                    setSelectedFolderPath(null);
-                  }}
-                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-slate-900 hover:text-white"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  领域
-                </button>
-                <span className="text-slate-600">/</span>
-                <button
-                  onClick={() => setSelectedFolderPath(null)}
-                  className={`font-semibold ${selectedFolderPath ? 'text-slate-300 hover:text-white' : 'text-white'}`}
-                >
-                  {selectedDomainObj?.name || selectedDomain}
-                </button>
-                {selectedFolderPath && (
-                  <>
-                    <span className="text-slate-600">/</span>
-                    <span className="font-semibold text-indigo-300">{selectedFolderPath}</span>
-                  </>
-                )}
-              </div>
-
-              <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-0.5 text-xs">
-                {(
-                  [
-                    ['all', '全部'],
-                    ['knowledge', '知识 (名词)'],
-                    ['decision', '决策 (动词)'],
-                  ] as const
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => setTypeFilter(key)}
-                    className={`rounded-lg px-3 py-1 font-medium transition ${
-                      typeFilter === key ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Architect Panel */}
-            <ArchitectPanel
-              domain={selectedDomain}
-              proposals={proposals.filter((p) => p.domain_slug === selectedDomain)}
-              onRefresh={refreshAll}
-              onBanner={(type, text) => setBanner({ type, text })}
-            />
-
-            {/* Adaptive 2-Shell Content Area */}
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-              {/* 2-Level Folder Tree Sidebar (Left on Desktop, Compact Top Drawer on Mobile) */}
-              <aside className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/50 p-3.5 lg:col-span-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-300">两级目录导航</span>
-                  <button
-                    onClick={() => {
-                      setAddingFolderParentId('root');
-                      setNewFolderName('');
-                    }}
-                    className="flex items-center gap-1 rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-indigo-300 hover:bg-slate-800"
-                  >
-                    <FolderPlus className="h-3 w-3" />
-                    一级目录
-                  </button>
-                </div>
-
-                {addingFolderParentId !== null && (
-                  <div className="mb-2 space-y-1.5 rounded-xl border border-indigo-500/30 bg-slate-950 p-2.5 text-xs">
-                    <div className="text-[11px] text-indigo-300">
-                      {addingFolderParentId === 'root' ? '新建一级目录' : '新建二级子目录'}
-                    </div>
-                    <input
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      placeholder="目录名称..."
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-white outline-none focus:border-indigo-500"
-                    />
-                    <div className="flex justify-end gap-1.5">
-                      <button
-                        onClick={() => setAddingFolderParentId(null)}
-                        className="px-2 py-1 text-[11px] text-slate-400"
-                      >
-                        取消
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (!newFolderName.trim()) return;
-                          try {
-                            await api.createFolder(
-                              selectedDomain,
-                              newFolderName.trim(),
-                              addingFolderParentId === 'root' ? null : addingFolderParentId,
-                            );
-                            setNewFolderName('');
-                            setAddingFolderParentId(null);
-                            await refreshAll();
-                          } catch (e) {
-                            setBanner({ type: 'err', text: (e as Error).message });
-                          }
-                        }}
-                        className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] text-white"
-                      >
-                        确定
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  onClick={() => setSelectedFolderPath(null)}
-                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs ${
-                    !selectedFolderPath
-                      ? 'bg-indigo-600/20 font-medium text-indigo-200'
-                      : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
-                  }`}
-                >
-                  <span>全部目录</span>
-                  <span>{domainNodes.length}</span>
-                </button>
-
-                <div className="space-y-1">
-                  {folderTree.level1.map((l1) => (
-                    <div key={l1.id} className="space-y-0.5">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setSelectedFolderPath(l1.fullRel)}
-                          className={`flex flex-1 items-center justify-between rounded-xl px-3 py-2 text-xs ${
-                            selectedFolderPath === l1.fullRel
-                              ? 'bg-indigo-600/20 font-medium text-indigo-200'
-                              : 'text-slate-300 hover:bg-slate-800/60'
-                          }`}
-                        >
-                          <span className="flex items-center gap-1.5 truncate">
-                            <Folder className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-                            <span className="truncate">{l1.folder_name}</span>
-                            {l1.is_system === 1 && (
-                              <span className="rounded bg-slate-800 px-1 text-[9px] text-slate-400">固定</span>
-                            )}
-                          </span>
-                          <span className="text-[11px] text-slate-500">{l1.totalCount}</span>
+                      <div className="mt-3 flex justify-end gap-2">
+                        <button onClick={() => setAddingDomain(false)} className="btn btn-ghost">
+                          取消
                         </button>
                         <button
-                          title="添加二级子目录"
-                          onClick={() => {
-                            setAddingFolderParentId(l1.id);
-                            setNewFolderName('');
-                          }}
-                          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-indigo-300"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </button>
-                        {l1.is_system !== 1 && (
-                          <button
-                            title="重命名一级目录"
-                            onClick={async () => {
-                              const next = window.prompt(`重命名「${l1.folder_name}」为：`, l1.folder_name);
-                              if (!next || next.trim() === l1.folder_name) return;
-                              await api.renameFolder(selectedDomain, l1.folder_name, next.trim(), l1.id);
+                          onClick={async () => {
+                            if (!newDomainName.trim()) return;
+                            try {
+                              await api.createDomain(newDomainName.trim(), newDomainDesc.trim());
+                              setNewDomainName('');
+                              setNewDomainDesc('');
+                              setAddingDomain(false);
                               await refreshAll();
-                            }}
-                            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                        )}
+                            } catch (e) {
+                              setBanner({ type: 'err', text: (e as Error).message });
+                            }
+                          }}
+                          className="btn btn-primary btn-press"
+                        >
+                          创建领域
+                        </button>
                       </div>
-
-                      {/* Level-2 Children */}
-                      {l1.children.length > 0 && (
-                        <div className="ml-4 space-y-0.5 border-l border-slate-800 pl-2">
-                          {l1.children.map((l2) => (
-                            <div key={l2.id} className="flex items-center gap-1">
-                              <button
-                                onClick={() => setSelectedFolderPath(l2.fullRel)}
-                                className={`flex flex-1 items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${
-                                  selectedFolderPath === l2.fullRel
-                                    ? 'bg-indigo-600/20 font-medium text-indigo-200'
-                                    : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
-                                }`}
-                              >
-                                <span className="truncate">{l2.folder_name}</span>
-                                <span className="text-[11px] text-slate-500">{l2.count}</span>
-                              </button>
-                              <button
-                                title="重命名二级目录"
-                                onClick={async () => {
-                                  const next = window.prompt(`重命名「${l2.folder_name}」为：`, l2.folder_name);
-                                  if (!next || next.trim() === l2.folder_name) return;
-                                  await api.renameFolder(selectedDomain, l2.folder_name, next.trim(), l2.id);
-                                  await refreshAll();
-                                }}
-                                className="rounded p-1 text-slate-600 hover:text-slate-300"
-                              >
-                                <Pencil className="h-2.5 w-2.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  ))}
-                </div>
-              </aside>
-
-              {/* Center: Crystallized Cards (Full-Width Single Column on Mobile, Grid on Desktop) */}
-              <div className="space-y-4 lg:col-span-6">
-                {filteredNodes.length === 0 && (
-                  <div className="rounded-2xl border border-dashed border-slate-800 p-10 text-center text-xs text-slate-500">
-                    当前目录下暂无符合条件的卡片。
-                  </div>
+                  </motion.div>
                 )}
+              </AnimatePresence>
 
-                {filteredNodes.map((node) => {
-                  const isKnowledge = node.node_type === 'knowledge';
-                  const isExpanded = expandedNodeId === node.id;
-                  const currentRelPath =
-                    (node.folder_path || `${node.domain_slug}/核心认知`).split('/').slice(1).join('/') || '核心认知';
+              <motion.div variants={stagger} initial="hidden" animate="show" className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                {domains.map((dom, i) => {
+                  const tone = DOMAIN_TONES[i % DOMAIN_TONES.length];
+                  const dNodes = nodes.filter((n) => n.domain_slug === dom.slug);
+                  const dActions = activeActions.filter((a) => a.domain_slug === dom.slug);
+                  const knowledgeCount = dNodes.filter((n) => n.node_type === 'knowledge').length;
+                  const decisionCount = dNodes.filter((n) => n.node_type !== 'knowledge').length;
+                  const total = Math.max(1, knowledgeCount + decisionCount);
+                  const enter = () => {
+                    setSelectedDomain(dom.slug);
+                    setSelectedFolderPath(null);
+                    setTypeFilter('all');
+                  };
 
                   return (
-                    <div
-                      key={node.id}
-                      className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-5"
+                    <motion.div
+                      key={dom.slug}
+                      variants={rise}
+                      whileHover={{ y: -4 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 22 }}
+                      className="card group flex flex-col justify-between p-5 transition-shadow hover:shadow-lift"
                     >
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                        <span
-                          className={`flex items-center gap-1 rounded-md px-2 py-0.5 font-medium ${
-                            isKnowledge ? 'bg-cyan-500/15 text-cyan-300' : 'bg-emerald-500/15 text-emerald-300'
-                          }`}
-                        >
-                          {isKnowledge ? <BookOpen className="h-3 w-3" /> : <Compass className="h-3 w-3" />}
-                          {isKnowledge ? '知识类' : '决策类'} · v{node.schema_version}
-                        </span>
-                        <span className="text-slate-400">
-                          效用 <b className="text-emerald-400">{Math.round(node.conversion_weight * 100)}%</b>
-                        </span>
-                      </div>
-
-                      <div className="text-xs font-medium text-indigo-300">{node.short_keyword || node.title}</div>
-                      <h3 className="mt-0.5 text-base font-semibold text-white sm:text-sm">{node.title}</h3>
-
-                      {node.needs_verification === 1 && (
-                        <div className="mt-2 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-200">
-                          <span>v{node.schema_version} 迁移字段待核实</span>
-                          <button
-                            onClick={async () => {
-                              await api.verifyNode(node.id);
-                              await refreshAll();
-                            }}
-                            className="rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100"
-                          >
-                            确认已核实
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="mt-2.5 rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200 sm:text-xs">
-                        <RichMarkdown content={node.atomic_claim} />
-                      </div>
-
-                      {/* Rich Blocks (Tables / Structured Data preserved intact) */}
-                      {(node.rich_blocks || []).map((rb, idx) => (
-                        <div key={idx} className="mt-3 rounded-xl border border-indigo-500/25 bg-slate-950/90 p-3">
-                          <div className="mb-1 text-xs font-semibold text-indigo-300">{rb.title}</div>
-                          <RichMarkdown content={rb.markdown} />
-                        </div>
-                      ))}
-
-                      {/* Authenticated Attachments (Images & Documents) */}
-                      {(node.attachments || []).length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {node.attachments?.map((att) => (
-                            <AuthImage
-                              key={att.id}
-                              fileId={att.id}
-                              filename={att.filename}
-                              isImage={att.is_image}
-                            />
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                        <button
-                          onClick={() => setExpandedNodeId(isExpanded ? null : node.id)}
-                          className="text-xs text-slate-400 hover:text-indigo-300 sm:text-[11px]"
-                        >
-                          {isExpanded ? '收起结构化字段 ▲' : '展开结构化字段 ▼'}
-                        </button>
-                        <select
-                          value={currentRelPath}
-                          onChange={async (e) => {
-                            await api.moveNodeFolder(node.id, e.target.value);
-                            await refreshAll();
-                          }}
-                          className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1 text-xs text-slate-300 sm:text-[11px]"
-                        >
-                          {folderTree.allPaths.map((p) => (
-                            <option key={p} value={p}>
-                              /{p}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="mt-2.5 space-y-2 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-sm text-slate-300 sm:text-xs">
-                          {Object.entries(node.payload).map(([k, v]) => (
-                            <div key={k}>
-                              <div className="font-semibold text-slate-400">{k}</div>
-                              <RichMarkdown content={typeof v === 'string' ? v : JSON.stringify(v, null, 2)} />
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <motion.div
+                              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${tone.badge}`}
+                              whileHover={{ rotate: [0, -10, 8, 0] }}
+                            >
+                              <Sprout className="h-6 w-6" />
+                            </motion.div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1">
+                                <h3 className="truncate text-lg font-extrabold text-ink">{dom.name}</h3>
+                                <button
+                                  title="重命名领域"
+                                  onClick={async () => {
+                                    const next = window.prompt(`重命名领域「${dom.name}」为：`, dom.name);
+                                    if (!next || next.trim() === dom.name) return;
+                                    await api.updateDomain(dom.slug, { name: next.trim() });
+                                    await refreshAll();
+                                  }}
+                                  className="icon-btn !p-1 opacity-60 group-hover:opacity-100"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                              <p className="truncate text-sm text-ink-muted">{dom.description || '自定义认知领域'}</p>
                             </div>
-                          ))}
+                          </div>
+                          <button onClick={enter} className="btn btn-outline btn-press btn-sm shrink-0">
+                            进入
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
                         </div>
-                      )}
 
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
-                        <span className="text-[11px] text-slate-500">可信度 {Math.round(node.confidence * 100)}%</span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setSocraticNodeId(node.id)}
-                            className="flex items-center gap-1 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-500/20"
-                          >
-                            <GraduationCap className="h-3.5 w-3.5" />
-                            陪练
-                          </button>
-                          <button
-                            onClick={() => handleProposeAction(node.id)}
-                            disabled={busyId !== null}
-                            className="flex items-center gap-1 rounded-lg bg-indigo-600/20 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-600/30 disabled:opacity-50"
-                          >
-                            {busyId === node.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Activity className="h-3.5 w-3.5" />
-                            )}
-                            {isKnowledge ? '理解检验' : '生成微行动'}
-                          </button>
+                        {/* knowledge / decision composition */}
+                        <div className="mt-4">
+                          <div className="mb-1.5 flex items-center justify-between text-xs font-bold text-ink-muted">
+                            <span>待执行行动 ({dActions.length})</span>
+                            <span className="flex items-center gap-2">
+                              <span className="flex items-center gap-1">
+                                <span className="h-2 w-2 rounded-full bg-mind-500" />知识 {knowledgeCount}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <span className="h-2 w-2 rounded-full bg-leaf-500" />决策 {decisionCount}
+                              </span>
+                            </span>
+                          </div>
+                          <div className="flex h-2 overflow-hidden rounded-full bg-paper-3">
+                            <motion.div
+                              className="h-full bg-mind-500"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(knowledgeCount / total) * 100}%` }}
+                              transition={{ type: 'spring', stiffness: 80, damping: 18, delay: 0.2 }}
+                            />
+                            <motion.div
+                              className="h-full bg-leaf-500"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(decisionCount / total) * 100}%` }}
+                              transition={{ type: 'spring', stiffness: 80, damping: 18, delay: 0.3 }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-4 space-y-2">
+                          {dActions.length > 0 ? (
+                            dActions.slice(0, 2).map((act) => (
+                              <div key={act.id} className="rounded-2xl border border-line bg-paper p-3">
+                                <div className="text-sm font-bold text-ink">{act.micro_action}</div>
+                                <div className="mt-1 flex gap-1.5 text-sm text-ink-muted">
+                                  <span className="chip chip-sun h-fit shrink-0 !px-1.5 !py-0">If</span>
+                                  <span className="line-clamp-2">{act.trigger_condition}</span>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <button
+                              onClick={enter}
+                              className="w-full rounded-2xl border-2 border-dashed border-line p-4 text-center text-sm text-ink-muted transition hover:border-leaf-200 hover:bg-leaf-50/50 hover:text-leaf-700"
+                            >
+                              暂无待执行微行动，点「进入」从结晶卡片生成。
+                            </button>
+                          )}
                         </div>
                       </div>
-                    </div>
+                    </motion.div>
                   );
                 })}
+              </motion.div>
+              {domains.length === 0 && (
+                <EmptyState icon={<Sprout className="h-6 w-6" />} tone="leaf" text="还没有认知领域，先新建一个吧。" />
+              )}
+            </motion.div>
+          ) : (
+            /* DOMAIN DRILL-DOWN: 2-Level Folder Tree + Rich Cards */
+            <motion.div key={`domain-${selectedDomain}`} {...pageFade} className="space-y-5">
+              {/* Breadcrumb & Type Filter */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <button
+                    onClick={() => {
+                      setSelectedDomain(null);
+                      setSelectedFolderPath(null);
+                    }}
+                    className="btn btn-outline btn-press btn-sm"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    领域
+                  </button>
+                  <ChevronRight className="h-4 w-4 text-ink-faint" />
+                  <button
+                    onClick={() => setSelectedFolderPath(null)}
+                    className={`text-lg font-extrabold ${selectedFolderPath ? 'text-ink-muted hover:text-ink' : 'text-ink'}`}
+                  >
+                    {selectedDomainObj?.name || selectedDomain}
+                  </button>
+                  {selectedFolderPath && (
+                    <>
+                      <ChevronRight className="h-4 w-4 text-ink-faint" />
+                      <span className="chip chip-clay !text-sm">
+                        <Folder className="h-3.5 w-3.5" />
+                        {selectedFolderPath}
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                <Segmented
+                  group="type-filter"
+                  value={typeFilter}
+                  onChange={setTypeFilter}
+                  options={[
+                    { value: 'all', label: '全部' },
+                    {
+                      value: 'knowledge',
+                      label: <><span className="h-2 w-2 rounded-full bg-mind-500" />知识 (名词)</>,
+                    },
+                    {
+                      value: 'decision',
+                      label: <><span className="h-2 w-2 rounded-full bg-leaf-500" />决策 (动词)</>,
+                    },
+                  ]}
+                />
               </div>
 
-              {/* Right: Domain Active Actions */}
-              <div className="space-y-3 lg:col-span-3">
-                <h3 className="flex items-center gap-2 text-xs font-semibold tracking-wider text-slate-400">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                  本领域待执行行动 ({domainActiveActions.length})
-                </h3>
-                {domainActiveActions.length === 0 && (
-                  <div className="rounded-2xl border border-dashed border-slate-800 p-6 text-center text-xs text-slate-500">
-                    点击卡片生成带理论依据的微实验。
-                  </div>
-                )}
-                {domainActiveActions.map((act) => (
-                  <div key={act.id} className="rounded-2xl border border-emerald-500/25 bg-slate-900/80 p-4">
-                    <div className="text-sm font-semibold text-white sm:text-xs">{act.micro_action}</div>
-                    {act.theoretical_basis && (
-                      <div className="mt-2 rounded-lg bg-indigo-500/10 px-2.5 py-1.5 text-xs text-indigo-200 sm:text-[11px]">
-                        <b>理论依据：</b>
-                        {act.theoretical_basis}
-                      </div>
-                    )}
-                    <div className="mt-2 space-y-1 rounded-xl bg-slate-950 p-2.5 text-xs text-slate-300 sm:text-[11px]">
-                      <div>
-                        <span className="text-amber-400">If 触发：</span>
-                        {act.trigger_condition}
-                      </div>
-                      <div>
-                        <span className="text-emerald-400">标准：</span>
-                        {act.success_metric}
-                      </div>
-                    </div>
+              {/* Architect Panel */}
+              <ArchitectPanel
+                domain={selectedDomain}
+                proposals={proposals.filter((p) => p.domain_slug === selectedDomain)}
+                onRefresh={refreshAll}
+                onBanner={(type, text) => setBanner({ type, text })}
+              />
+
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+                {/* Folder sidebar */}
+                <aside className="card h-fit space-y-1.5 p-3.5 lg:sticky lg:top-24 lg:col-span-3">
+                  <div className="mb-2 flex items-center justify-between px-1">
+                    <span className="eyebrow">两级目录</span>
                     <button
-                      onClick={() => setAuditTarget(act)}
-                      className="mt-3 w-full rounded-xl bg-emerald-600 py-2.5 text-xs font-medium text-white hover:bg-emerald-500"
+                      onClick={() => {
+                        setAddingFolderParentId('root');
+                        setNewFolderName('');
+                      }}
+                      className="btn btn-soft-clay btn-sm !px-2 !py-1"
                     >
-                      提交真实反馈
+                      <FolderPlus className="h-3.5 w-3.5" />
+                      一级目录
                     </button>
                   </div>
-                ))}
+
+                  <AnimatePresence>
+                    {addingFolderParentId !== null && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="mb-2 space-y-2 rounded-2xl border border-clay-100 bg-clay-50 p-2.5">
+                          <div className="text-xs font-bold text-clay-700">
+                            {addingFolderParentId === 'root' ? '新建一级目录' : '新建二级子目录'}
+                          </div>
+                          <input
+                            value={newFolderName}
+                            onChange={(e) => setNewFolderName(e.target.value)}
+                            placeholder="目录名称..."
+                            className="input !py-1.5 !text-sm"
+                            autoFocus
+                          />
+                          <div className="flex justify-end gap-1.5">
+                            <button onClick={() => setAddingFolderParentId(null)} className="btn btn-ghost btn-sm">
+                              取消
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!newFolderName.trim()) return;
+                                try {
+                                  await api.createFolder(
+                                    selectedDomain,
+                                    newFolderName.trim(),
+                                    addingFolderParentId === 'root' ? null : addingFolderParentId,
+                                  );
+                                  setNewFolderName('');
+                                  setAddingFolderParentId(null);
+                                  await refreshAll();
+                                } catch (e) {
+                                  setBanner({ type: 'err', text: (e as Error).message });
+                                }
+                              }}
+                              className="btn btn-primary btn-press btn-sm"
+                            >
+                              确定
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <button onClick={() => setSelectedFolderPath(null)} className={`w-full ${folderRowClass(!selectedFolderPath)}`}>
+                    <span className="flex items-center gap-2">
+                      <LayoutGrid className="h-4 w-4" />
+                      全部目录
+                    </span>
+                    <span className="text-xs font-bold tabular-nums">{domainNodes.length}</span>
+                  </button>
+
+                  <div className="space-y-1">
+                    {folderTree.level1.map((l1) => (
+                      <div key={l1.id} className="space-y-0.5">
+                        <div className="group flex items-center gap-0.5">
+                          <button onClick={() => setSelectedFolderPath(l1.fullRel)} className={folderRowClass(selectedFolderPath === l1.fullRel)}>
+                            <span className="flex min-w-0 items-center gap-2">
+                              <Folder className="h-4 w-4 shrink-0 text-clay-500" />
+                              <span className="truncate">{l1.folder_name}</span>
+                              {l1.is_system === 1 && <span className="chip chip-muted !px-1.5 !py-0 !text-xs">固定</span>}
+                            </span>
+                            <span className="text-xs font-bold text-ink-muted tabular-nums">{l1.totalCount}</span>
+                          </button>
+                          <button
+                            title="添加二级子目录"
+                            onClick={() => {
+                              setAddingFolderParentId(l1.id);
+                              setNewFolderName('');
+                            }}
+                            className="icon-btn !p-1.5 opacity-50 group-hover:opacity-100"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                          {l1.is_system !== 1 && (
+                            <button
+                              title="重命名一级目录"
+                              onClick={async () => {
+                                const next = window.prompt(`重命名「${l1.folder_name}」为：`, l1.folder_name);
+                                if (!next || next.trim() === l1.folder_name) return;
+                                await api.renameFolder(selectedDomain, l1.folder_name, next.trim(), l1.id);
+                                await refreshAll();
+                              }}
+                              className="icon-btn !p-1.5 opacity-50 group-hover:opacity-100"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        {l1.children.length > 0 && (
+                          <div className="ml-5 space-y-0.5 border-l-2 border-leaf-100 pl-2">
+                            {l1.children.map((l2) => (
+                              <div key={l2.id} className="group flex items-center gap-0.5">
+                                <button
+                                  onClick={() => setSelectedFolderPath(l2.fullRel)}
+                                  className={`${folderRowClass(selectedFolderPath === l2.fullRel)} !py-1.5`}
+                                >
+                                  <span className="flex min-w-0 items-center gap-1.5">
+                                    <Leaf className="h-3.5 w-3.5 shrink-0 text-leaf-400" />
+                                    <span className="truncate">{l2.folder_name}</span>
+                                  </span>
+                                  <span className="text-xs font-bold text-ink-muted tabular-nums">{l2.count}</span>
+                                </button>
+                                <button
+                                  title="重命名二级目录"
+                                  onClick={async () => {
+                                    const next = window.prompt(`重命名「${l2.folder_name}」为：`, l2.folder_name);
+                                    if (!next || next.trim() === l2.folder_name) return;
+                                    await api.renameFolder(selectedDomain, l2.folder_name, next.trim(), l2.id);
+                                    await refreshAll();
+                                  }}
+                                  className="icon-btn !p-1.5 opacity-50 group-hover:opacity-100"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </aside>
+
+                {/* Center: cards */}
+                <div className="space-y-4 lg:col-span-6">
+                  {filteredNodes.length === 0 && (
+                    <EmptyState icon={<Sprout className="h-6 w-6" />} tone="leaf" text="当前目录下暂无符合条件的卡片。" />
+                  )}
+                  <AnimatePresence mode="popLayout">
+                    {filteredNodes.map((node) => {
+                      const currentRelPath =
+                        (node.folder_path || `${node.domain_slug}/核心认知`).split('/').slice(1).join('/') || '核心认知';
+                      return (
+                        <NodeCard
+                          key={node.id}
+                          node={node}
+                          expanded={expandedNodeId === node.id}
+                          fresh={freshIds.has(node.id)}
+                          busy={busyId === node.id}
+                          disabled={busyId !== null}
+                          folderPaths={folderTree.allPaths}
+                          currentRelPath={currentRelPath}
+                          onToggleExpand={() => setExpandedNodeId(expandedNodeId === node.id ? null : node.id)}
+                          onMove={async (p) => {
+                            await api.moveNodeFolder(node.id, p);
+                            await refreshAll();
+                          }}
+                          onVerify={async () => {
+                            await api.verifyNode(node.id);
+                            await refreshAll();
+                          }}
+                          onSocratic={() => setSocraticNodeId(node.id)}
+                          onPropose={() => handleProposeAction(node.id)}
+                        />
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+
+                {/* Right: active actions */}
+                <div className="space-y-3 lg:sticky lg:top-24 lg:col-span-3 lg:h-fit">
+                  <h3 className="flex items-center gap-2 px-1 text-sm font-extrabold text-ink">
+                    <CheckCircle2 className="h-4 w-4 text-leaf-600" />
+                    本领域待执行行动
+                    <span className="chip chip-leaf !py-0">{domainActiveActions.length}</span>
+                  </h3>
+                  {domainActiveActions.length === 0 && (
+                    <div className="rounded-3xl border-2 border-dashed border-line p-6 text-center text-sm text-ink-muted">
+                      点击卡片生成带理论依据的微实验。
+                    </div>
+                  )}
+                  <AnimatePresence mode="popLayout">
+                    {domainActiveActions.map((act) => (
+                      <ActionCard key={act.id} act={{ ...act, node_title: undefined }} onAudit={() => setAuditTarget(act)} />
+                    ))}
+                  </AnimatePresence>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
 
       {/* Desktop Floating Action Ball */}
@@ -1010,52 +979,30 @@ export function App() {
         onError={(text) => setBanner({ type: 'err', text })}
       />
 
-      {/* Mobile Fixed Bottom Navigation Bar */}
+      {/* Mobile bottom navigation */}
       {isMobile && (
-        <nav className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-slate-800 bg-slate-950/95 px-2 py-1.5 backdrop-blur">
-          <button
-            onClick={() => setViewMode('workspace')}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1 text-[10px] ${
-              viewMode === 'workspace' ? 'text-indigo-400' : 'text-slate-400'
-            }`}
-          >
-            <LayoutGrid className="h-5 w-5" />
-            工作台
-          </button>
-          <button
-            onClick={() => setViewMode('tree3d')}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1 text-[10px] ${
-              viewMode === 'tree3d' ? 'text-indigo-400' : 'text-slate-400'
-            }`}
-          >
-            <Globe className="h-5 w-5" />
-            3D 树
-          </button>
-          <button
+        <nav className="fixed inset-x-3 bottom-3 z-40 flex items-center justify-around rounded-3xl border border-line bg-surface/95 px-1 py-1.5 shadow-lift backdrop-blur">
+          <MobileTab active={viewMode === 'workspace'} onClick={() => setViewMode('workspace')} icon={<LayoutGrid className="h-5 w-5" />} label="工作台" />
+          <MobileTab active={viewMode === 'tree3d'} onClick={() => setViewMode('tree3d')} icon={<Globe className="h-5 w-5" />} label="知识树" />
+          <motion.button
             onClick={() => setCaptureOpen(true)}
-            className="flex h-11 w-11 -translate-y-2 items-center justify-center rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-lg"
+            whileTap={{ scale: 0.9 }}
+            aria-label="捕获对话"
+            className="flex h-14 w-14 -translate-y-4 items-center justify-center rounded-full border-4 border-paper bg-leaf-600 text-white shadow-[0_5px_0_var(--color-leaf-800)]"
           >
-            <Plus className="h-5 w-5" />
-          </button>
-          <button
+            <Plus className="h-6 w-6" strokeWidth={2.6} />
+          </motion.button>
+          <MobileTab
+            active={false}
             onClick={() => {
               if (dueSocraticNodes.length > 0) setSocraticNodeId(dueSocraticNodes[0].id);
               else if (nodes.length > 0) setSocraticNodeId(nodes[0].id);
             }}
-            className="flex flex-col items-center gap-0.5 px-3 py-1 text-[10px] text-slate-400 hover:text-cyan-300"
-          >
-            <GraduationCap className="h-5 w-5" />
-            陪练
-          </button>
-          <button
-            onClick={() => setViewMode('metrics')}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1 text-[10px] ${
-              viewMode === 'metrics' ? 'text-indigo-400' : 'text-slate-400'
-            }`}
-          >
-            <BarChart3 className="h-5 w-5" />
-            指标
-          </button>
+            icon={<GraduationCap className="h-5 w-5" />}
+            label="陪练"
+            badge={dueSocraticNodes.length}
+          />
+          <MobileTab active={viewMode === 'metrics'} onClick={() => setViewMode('metrics')} icon={<BarChart3 className="h-5 w-5" />} label="指标" />
         </nav>
       )}
 
@@ -1076,17 +1023,73 @@ export function App() {
         }}
       />
 
-      <footer className="mt-10 pb-6 text-center text-[11px] text-slate-600">
-        <a
-          href="https://beian.miit.gov.cn/"
-          target="_blank"
-          rel="noreferrer"
-          className="hover:text-slate-400"
-        >
+      <footer className="mt-12 pb-6 text-center text-xs text-ink-muted">
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer" className="hover:text-ink">
           湘ICP备2026033436号
         </a>
       </footer>
     </div>
   );
 }
+
+const pageFade = {
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -6 },
+  transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] as const },
+};
+
+function EmptyState({ icon, text, tone }: { icon: React.ReactNode; text: string; tone: 'leaf' | 'sun' }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-3xl border-2 border-dashed border-line bg-surface/60 p-10 text-center">
+      <motion.div animate={{ y: [0, -5, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}>
+        <IconBadge tone={tone} size="lg">
+          {icon}
+        </IconBadge>
+      </motion.div>
+      <p className="text-sm text-ink-muted">{text}</p>
+    </div>
+  );
+}
+
+function MobileTab({
+  active,
+  onClick,
+  icon,
+  label,
+  badge = 0,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  badge?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`relative flex flex-col items-center gap-0.5 rounded-2xl px-3 py-1 text-xs font-bold transition ${
+        active ? 'text-leaf-700' : 'text-ink-muted'
+      }`}
+    >
+      {active && (
+        <motion.span
+          layoutId="mobile-tab"
+          className="absolute inset-0 rounded-2xl bg-leaf-50"
+          transition={{ type: 'spring', stiffness: 500, damping: 36 }}
+        />
+      )}
+      <span className="relative">
+        {icon}
+        {badge > 0 && (
+          <span className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-mind-600 px-1 text-[0.65rem] text-white">
+            {badge}
+          </span>
+        )}
+      </span>
+      <span className="relative">{label}</span>
+    </button>
+  );
+}
+
 export default App;

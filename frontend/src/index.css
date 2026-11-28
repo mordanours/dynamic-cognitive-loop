@@ -1,1 +1,392 @@
+/* Fonts: self-hosted, no external CDN. Nunito (Latin, rounded) + Noto Sans SC (思源黑体). */
+@import "@fontsource/nunito/latin-400.css";
+@import "@fontsource/nunito/latin-600.css";
+@import "@fontsource/nunito/latin-700.css";
+@import "@fontsource/nunito/latin-800.css";
+@import "@fontsource/noto-sans-sc/400.css";
+@import "@fontsource/noto-sans-sc/500.css";
+@import "@fontsource/noto-sans-sc/700.css";
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* ------------------------------------------------------------------ */
+/* Design tokens — "knowledge grows like a living thing"               */
+/* ------------------------------------------------------------------ */
+@theme {
+  --font-sans: "Nunito", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-display: "Nunito", "Noto Sans SC", system-ui, sans-serif;
+
+  /* Paper & ink (neutral, warm) */
+  --color-paper: #fbfaf6;
+  --color-paper-2: #f4f1ea;
+  --color-paper-3: #ebe6db;
+  --color-surface: #ffffff;
+  --color-ink: #1f2a24;
+  --color-ink-soft: #46524b;
+  --color-ink-muted: #5f6b64;
+  --color-ink-faint: #9aa39d;
+  --color-line: #ece8df;
+  --color-line-strong: #dcd6c9;
+
+  /* Leaf — brand / decision / success / DCR */
+  --color-leaf-50: #ecf8f1;
+  --color-leaf-100: #d4efdf;
+  --color-leaf-200: #a9debf;
+  --color-leaf-300: #74c799;
+  --color-leaf-400: #4cb67f;
+  --color-leaf-500: #2fa36b;
+  --color-leaf-600: #1a7d4e;
+  --color-leaf-700: #186e45;
+  --color-leaf-800: #125334;
+
+  /* Mind (sky) — knowledge / Socratic */
+  --color-mind-50: #eaf5fc;
+  --color-mind-100: #cfe7f6;
+  --color-mind-200: #9fcfec;
+  --color-mind-300: #6bb6e2;
+  --color-mind-500: #2e9bd6;
+  --color-mind-600: #1c77aa;
+  --color-mind-700: #17638f;
+  --color-mind-800: #114a6b;
+
+  /* Sun — If-trigger / Low energy / warnings */
+  --color-sun-50: #fef7e6;
+  --color-sun-100: #fcecc3;
+  --color-sun-200: #f8da8c;
+  --color-sun-300: #f5c661;
+  --color-sun-500: #f2b33d;
+  --color-sun-600: #c98a12;
+  --color-sun-700: #8f600a;
+
+  /* Clay — folders / domains */
+  --color-clay-50: #fcefea;
+  --color-clay-100: #f8ddd3;
+  --color-clay-200: #f0baa7;
+  --color-clay-300: #e89a80;
+  --color-clay-500: #e07a5f;
+  --color-clay-600: #c45e44;
+  --color-clay-700: #96442f;
+
+  /* Coral — errors / destructive */
+  --color-coral-50: #fdeeee;
+  --color-coral-100: #fad5d6;
+  --color-coral-500: #e5484d;
+  --color-coral-600: #c9343a;
+  --color-coral-700: #9f262b;
+
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.125rem;
+  --radius-3xl: 1.5rem;
+
+  --shadow-soft: 0 1px 2px rgb(60 50 30 / 0.04), 0 4px 16px -4px rgb(60 50 30 / 0.08);
+  --shadow-lift: 0 2px 4px rgb(60 50 30 / 0.05), 0 16px 32px -12px rgb(60 50 30 / 0.18);
+  --shadow-pop: 0 24px 64px -16px rgb(40 50 40 / 0.28);
+
+  --animate-breathe: breathe 4.5s ease-in-out infinite;
+  --animate-sway: sway 6s ease-in-out infinite;
+
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.045); }
+  }
+  @keyframes sway {
+    0%, 100% { transform: rotate(-3deg); }
+    50% { transform: rotate(3deg); }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                               */
+/* ------------------------------------------------------------------ */
+@layer base {
+  html {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.6;
+    background: var(--color-paper);
+    color: var(--color-ink);
+  }
+  ::selection {
+    background: var(--color-leaf-200);
+    color: var(--color-ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-leaf-500);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+  select,
+  input,
+  textarea {
+    color: var(--color-ink);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-ink-faint);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Components                                                         */
+/* ------------------------------------------------------------------ */
+@layer components {
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-3xl);
+    box-shadow: var(--shadow-soft);
+  }
+  .well {
+    background: var(--color-paper-2);
+    border-radius: var(--radius-2xl);
+  }
+
+  /* Duolingo-style pressable button: solid face + darker "lip" */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border-radius: var(--radius-2xl);
+    font-weight: 700;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    padding: 0.55rem 1rem;
+    transition: transform 120ms ease, box-shadow 120ms ease, background-color 150ms ease, color 150ms ease,
+      border-color 150ms ease;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-sm {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8125rem;
+    border-radius: var(--radius-xl);
+  }
+  .btn-lg {
+    padding: 0.8rem 1.25rem;
+    font-size: 0.95rem;
+  }
+  .btn-press {
+    box-shadow: 0 4px 0 var(--lip, rgb(0 0 0 / 0.15));
+    transform: translateY(0);
+  }
+  .btn-press:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 0 var(--lip, rgb(0 0 0 / 0.15));
+  }
+  .btn-press:not(:disabled):active {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 var(--lip, rgb(0 0 0 / 0.15));
+  }
+  .btn-primary {
+    --lip: var(--color-leaf-800);
+    background: var(--color-leaf-600);
+    color: #fff;
+  }
+  .btn-primary:not(:disabled):hover {
+    background: var(--color-leaf-700);
+  }
+  .btn-mind {
+    --lip: var(--color-mind-800);
+    background: var(--color-mind-600);
+    color: #fff;
+  }
+  .btn-mind:not(:disabled):hover {
+    background: var(--color-mind-700);
+  }
+  .btn-sun {
+    --lip: var(--color-sun-600);
+    background: var(--color-sun-300);
+    color: var(--color-ink);
+  }
+  .btn-danger {
+    --lip: var(--color-coral-700);
+    background: var(--color-coral-600);
+    color: #fff;
+  }
+  .btn-outline {
+    --lip: var(--color-line-strong);
+    background: var(--color-surface);
+    color: var(--color-ink-soft);
+    border: 2px solid var(--color-line-strong);
+  }
+  .btn-outline:not(:disabled):hover {
+    color: var(--color-ink);
+    background: var(--color-paper);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--color-ink-muted);
+  }
+  .btn-ghost:not(:disabled):hover {
+    background: var(--color-paper-2);
+    color: var(--color-ink);
+  }
+  .btn-soft-leaf {
+    background: var(--color-leaf-50);
+    color: var(--color-leaf-700);
+    border: 1.5px solid var(--color-leaf-100);
+  }
+  .btn-soft-leaf:not(:disabled):hover {
+    background: var(--color-leaf-100);
+  }
+  .btn-soft-mind {
+    background: var(--color-mind-50);
+    color: var(--color-mind-700);
+    border: 1.5px solid var(--color-mind-100);
+  }
+  .btn-soft-mind:not(:disabled):hover {
+    background: var(--color-mind-100);
+  }
+  .btn-soft-sun {
+    background: var(--color-sun-50);
+    color: var(--color-sun-700);
+    border: 1.5px solid var(--color-sun-100);
+  }
+  .btn-soft-sun:not(:disabled):hover {
+    background: var(--color-sun-100);
+  }
+  .btn-soft-clay {
+    background: var(--color-clay-50);
+    color: var(--color-clay-700);
+    border: 1.5px solid var(--color-clay-100);
+  }
+  .btn-soft-clay:not(:disabled):hover {
+    background: var(--color-clay-100);
+  }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-xl);
+    padding: 0.4rem;
+    color: var(--color-ink-muted);
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+  .icon-btn:hover {
+    background: var(--color-paper-2);
+    color: var(--color-ink);
+  }
+
+  .input {
+    width: 100%;
+    border-radius: var(--radius-xl);
+    border: 2px solid var(--color-line);
+    background: var(--color-surface);
+    padding: 0.55rem 0.8rem;
+    font-size: 0.9rem;
+    color: var(--color-ink);
+    outline: none;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .input:focus {
+    border-color: var(--color-leaf-400);
+    box-shadow: 0 0 0 4px var(--color-leaf-50);
+  }
+
+  /* Segmented control */
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: var(--radius-2xl);
+    background: var(--color-paper-2);
+    border: 1px solid var(--color-line);
+  }
+  .seg-item {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: var(--radius-xl);
+    padding: 0.3rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: var(--color-ink-muted);
+    transition: color 150ms ease;
+    white-space: nowrap;
+  }
+  .seg-item:hover {
+    color: var(--color-ink);
+  }
+  .seg-item[data-active="true"] {
+    color: var(--color-ink);
+  }
+  .seg-pill {
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-xl);
+    background: var(--color-surface);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 2px 6px -2px rgb(0 0 0 / 0.1);
+    z-index: 0;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.25rem;
+  }
+  .chip-mind {
+    background: var(--color-mind-50);
+    color: var(--color-mind-700);
+  }
+  .chip-leaf {
+    background: var(--color-leaf-50);
+    color: var(--color-leaf-700);
+  }
+  .chip-sun {
+    background: var(--color-sun-50);
+    color: var(--color-sun-700);
+  }
+  .chip-clay {
+    background: var(--color-clay-50);
+    color: var(--color-clay-700);
+  }
+  .chip-muted {
+    background: var(--color-paper-2);
+    color: var(--color-ink-muted);
+  }
+
+  .label {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: var(--color-ink-soft);
+  }
+  .eyebrow {
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

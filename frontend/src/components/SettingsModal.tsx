@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
-import { X, CheckCircle2, AlertCircle, Loader2, Eye } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { CheckCircle2, AlertCircle, Loader2, Eye, ChevronDown, Settings2 } from 'lucide-react';
 import { api, LLMSettings, ProviderType, VisionConfig } from '../api';
+import { IconBadge, Modal } from './ui/Modal';
+import { Segmented } from './ui/Living';
 
 interface Props {
   open: boolean;
@@ -34,7 +37,8 @@ export function SettingsModal({ open, onClose }: Props) {
     });
   }, [open]);
 
-  if (!open || !settings) return null;
+  // Settings not loaded yet: render nothing (modal stays closed until data arrives).
+  if (!settings) return <Modal open={false} onClose={onClose}>{null}</Modal>;
 
   const activeKey = settings.active_provider;
   const profile = settings.profiles[activeKey];
@@ -102,161 +106,182 @@ export function SettingsModal({ open, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">模型接口设置 (OpenAI 兼容协议)</h2>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+    <Modal
+      open={open}
+      onClose={onClose}
+      maxWidth="sm:max-w-lg"
+      title="模型接口设置 (OpenAI 兼容协议)"
+      icon={
+        <IconBadge tone="leaf">
+          <Settings2 className="h-5 w-5" />
+        </IconBadge>
+      }
+    >
+      <div className="flex-1 space-y-5 overflow-y-auto p-5 text-sm">
+        <Segmented
+          group="settings-provider"
+          value={activeKey}
+          onChange={handleProviderSwitch}
+          className="flex w-full [&>button]:flex-1 [&>button]:justify-center [&>button]:!py-2"
+          options={(['deepseek', 'openai_compatible', 'local'] as ProviderType[]).map((key) => ({
+            value: key,
+            label: key === 'deepseek' ? 'DeepSeek API' : key === 'openai_compatible' ? 'OpenAI 兼容' : '本地 Ollama',
+            activeClass: '!bg-leaf-50 ring-1 ring-leaf-200',
+          }))}
+        />
 
-        <div className="mb-4 grid grid-cols-3 gap-2">
-          {(['deepseek', 'openai_compatible', 'local'] as ProviderType[]).map((key) => (
-            <button
-              key={key}
-              onClick={() => handleProviderSwitch(key)}
-              className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
-                activeKey === key
-                  ? 'border-indigo-500 bg-indigo-500/20 text-indigo-200'
-                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              {key === 'deepseek' ? 'DeepSeek API' : key === 'openai_compatible' ? 'OpenAI 兼容' : '本地 Ollama'}
-            </button>
-          ))}
-        </div>
-
-        <div className="space-y-3 text-sm">
+        <div className="space-y-4">
           <div>
-            <label className="mb-1 block text-xs text-slate-400">Base URL</label>
-            <input
-              value={profile.base_url}
-              onChange={(e) => updateField('base_url', e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-indigo-500"
-            />
+            <label className="label">Base URL</label>
+            <input value={profile.base_url} onChange={(e) => updateField('base_url', e.target.value)} className="input" />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-slate-400">
-              API Key {profile.api_key_masked ? `(已配置: ${profile.api_key_masked})` : ''}
+            <label className="label">
+              API Key{' '}
+              {profile.api_key_masked ? (
+                <span className="font-semibold text-leaf-700">(已配置: {profile.api_key_masked})</span>
+              ) : (
+                ''
+              )}
             </label>
             <input
               type="password"
               value={apiKeyInput}
               onChange={(e) => setApiKeyInput(e.target.value)}
               placeholder={activeKey === 'local' ? 'ollama (本地无需真实 Key)' : 'sk-...'}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-indigo-500"
+              className="input"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs text-slate-400">Fast 模型 (轻量/低带宽)</label>
+              <label className="label">Fast 模型 (轻量/低带宽)</label>
               <input
                 value={profile.fast_model}
                 onChange={(e) => updateField('fast_model', e.target.value)}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-indigo-500"
+                className="input"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-slate-400">Reasoning 模型 (提炼/推理)</label>
+              <label className="label">Reasoning 模型 (提炼/推理)</label>
               <input
                 value={profile.reasoning_model}
                 onChange={(e) => updateField('reasoning_model', e.target.value)}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-indigo-500"
+                className="input"
               />
             </div>
           </div>
         </div>
 
         {/* Optional Vision Model Config */}
-        <div className="mt-5 border-t border-slate-800 pt-4">
+        <div className="border-t border-line pt-4">
           <button
             type="button"
             onClick={() => setShowVision((v) => !v)}
-            className="flex w-full items-center justify-between text-xs font-medium text-indigo-300 hover:text-indigo-200"
+            className="flex w-full items-center justify-between gap-3 rounded-xl px-1 py-1 text-left text-sm font-bold text-ink-soft hover:text-ink"
           >
-            <span className="flex items-center gap-1.5">
-              <Eye className="h-3.5 w-3.5" />
+            <span className="flex items-center gap-2">
+              <IconBadge tone="mind" size="sm">
+                <Eye className="h-4 w-4" />
+              </IconBadge>
               视觉识别模型设置 (用于图片/截图 OCR 与表格提取)
             </span>
-            <span>{vision.enabled ? '已启用' : '未启用'}</span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              <span className={`chip ${vision.enabled ? 'chip-leaf' : 'chip-muted'}`}>
+                {vision.enabled ? '已启用' : '未启用'}
+              </span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${showVision ? 'rotate-180' : ''}`} />
+            </span>
           </button>
 
-          {showVision && (
-            <div className="mt-3 space-y-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 text-xs">
-              <label className="flex items-center gap-2 text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={vision.enabled}
-                  onChange={(e) => updateVision({ enabled: e.target.checked })}
-                  className="rounded border-slate-700"
-                />
-                启用视觉识别模型（支持 Qwen-VL / GPT-4o-mini / Gemini 等 OpenAI 兼容接口）
-              </label>
-              <div>
-                <label className="mb-1 block text-slate-400">Vision Base URL</label>
-                <input
-                  value={vision.base_url}
-                  onChange={(e) => updateVision({ base_url: e.target.value })}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-slate-100"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="mb-1 block text-slate-400">
-                    Vision Key {vision.api_key_masked ? `(${vision.api_key_masked})` : ''}
+          <AnimatePresence initial={false}>
+            {showVision && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="well mt-3 space-y-4 p-4">
+                  <label className="flex cursor-pointer items-start gap-2.5 text-sm text-ink-soft">
+                    <input
+                      type="checkbox"
+                      checked={vision.enabled}
+                      onChange={(e) => updateVision({ enabled: e.target.checked })}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded accent-leaf-600"
+                    />
+                    启用视觉识别模型（支持 Qwen-VL / GPT-4o-mini / Gemini 等 OpenAI 兼容接口）
                   </label>
-                  <input
-                    type="password"
-                    value={visionKeyInput}
-                    onChange={(e) => setVisionKeyInput(e.target.value)}
-                    placeholder="sk-..."
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-slate-100"
-                  />
+                  <div>
+                    <label className="label">Vision Base URL</label>
+                    <input
+                      value={vision.base_url}
+                      onChange={(e) => updateVision({ base_url: e.target.value })}
+                      className="input"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="label">
+                        Vision Key {vision.api_key_masked ? `(${vision.api_key_masked})` : ''}
+                      </label>
+                      <input
+                        type="password"
+                        value={visionKeyInput}
+                        onChange={(e) => setVisionKeyInput(e.target.value)}
+                        placeholder="sk-..."
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Vision 模型名</label>
+                      <input
+                        value={vision.model}
+                        onChange={(e) => updateVision({ model: e.target.value })}
+                        placeholder="gpt-4o-mini / qwen-vl-max"
+                        className="input"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="mb-1 block text-slate-400">Vision 模型名</label>
-                  <input
-                    value={vision.model}
-                    onChange={(e) => updateVision({ model: e.target.value })}
-                    placeholder="gpt-4o-mini / qwen-vl-max"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-slate-100"
-                  />
-                </div>
-              </div>
-            </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <AnimatePresence mode="wait">
+          {message && (
+            <motion.div
+              key={message.text}
+              initial={{ opacity: 0, y: 8, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 26 }}
+              className={`flex items-start gap-2 rounded-2xl border px-3.5 py-2.5 text-sm ${
+                message.type === 'ok'
+                  ? 'border-leaf-100 bg-leaf-50 text-leaf-700'
+                  : 'border-coral-100 bg-coral-50 text-coral-700'
+              }`}
+            >
+              {message.type === 'ok' ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              ) : (
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              )}
+              <span className="break-all">{message.text}</span>
+            </motion.div>
           )}
-        </div>
-
-        {message && (
-          <div
-            className={`mt-4 flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
-              message.type === 'ok' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'
-            }`}
-          >
-            {message.type === 'ok' ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-            <span>{message.text}</span>
-          </div>
-        )}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            onClick={handleTest}
-            disabled={testing || saving}
-            className="flex items-center gap-1.5 rounded-xl border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
-          >
-            {testing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            保存并测试连接
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || testing}
-            className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            保存配置
-          </button>
-        </div>
+        </AnimatePresence>
       </div>
-    </div>
+
+      <div className="flex justify-end gap-2 border-t border-line px-5 py-4">
+        <button onClick={handleTest} disabled={testing || saving} className="btn btn-outline btn-press">
+          {testing && <Loader2 className="h-4 w-4 animate-spin" />}
+          保存并测试连接
+        </button>
+        <button onClick={handleSave} disabled={saving || testing} className="btn btn-primary btn-press">
+          保存配置
+        </button>
+      </div>
+    </Modal>
   );
 }

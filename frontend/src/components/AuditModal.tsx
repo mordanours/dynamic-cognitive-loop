@@ -1,6 +1,9 @@
 import { useState } from 'react';
-import { X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { CheckCircle2, ClipboardCheck, Zap } from 'lucide-react';
 import { ActionExperiment, api } from '../api';
+import { IconBadge, Modal } from './ui/Modal';
+import { Segmented } from './ui/Living';
 
 interface Props {
   action: ActionExperiment | null;
@@ -16,6 +19,14 @@ const SCORES = [
   { val: -2, label: '-2 证实有害' },
 ];
 
+const SCORE_TONE: Record<number, string> = {
+  2: 'border-leaf-300 bg-leaf-50 text-leaf-700',
+  1: 'border-leaf-200 bg-leaf-50 text-leaf-700',
+  0: 'border-line-strong bg-paper-2 text-ink',
+  [-1]: 'border-sun-200 bg-sun-50 text-sun-700',
+  [-2]: 'border-coral-100 bg-coral-50 text-coral-700',
+};
+
 const FRICTIONS = [
   { val: 'none', label: '无阻力' },
   { val: 'forgot', label: '忘记触发' },
@@ -30,10 +41,13 @@ export function AuditModal({ action, onClose, onSubmitted }: Props) {
   const [friction, setFriction] = useState('none');
   const [reflection, setReflection] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  if (!action) return null;
+  // Keep the last action rendered so the exit animation has content.
+  const [shown, setShown] = useState<ActionExperiment | null>(action);
+  if (action && action !== shown) setShown(action);
+  const view = action ?? shown;
 
   const handleSubmit = async () => {
+    if (!action) return;
     setSubmitting(true);
     try {
       await api.auditAction(action.id, {
@@ -50,105 +64,122 @@ export function AuditModal({ action, onClose, onSubmitted }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-white">知行审计：提交真实反馈</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-800">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="mb-4 rounded-xl bg-slate-950 p-3 text-xs text-slate-300">
-          <div className="font-medium text-indigo-300">微行动：{action.micro_action}</div>
-          <div className="mt-1 text-slate-400">触发条件：{action.trigger_condition}</div>
-        </div>
-
-        <div className="space-y-4 text-sm">
-          <div className="flex gap-2">
-            <button
-              onClick={() => setExecuted(true)}
-              className={`flex-1 rounded-xl border py-2 text-xs font-medium ${
-                executed
-                  ? 'border-emerald-500 bg-emerald-500/20 text-emerald-200'
-                  : 'border-slate-800 bg-slate-950 text-slate-400'
-              }`}
-            >
-              已实际执行
-            </button>
-            <button
-              onClick={() => setExecuted(false)}
-              className={`flex-1 rounded-xl border py-2 text-xs font-medium ${
-                !executed
-                  ? 'border-amber-500 bg-amber-500/20 text-amber-200'
-                  : 'border-slate-800 bg-slate-950 text-slate-400'
-              }`}
-            >
-              未执行 / 放弃
-            </button>
-          </div>
-
-          {executed && (
-            <div>
-              <label className="mb-1.5 block text-xs text-slate-400">现实结果打分（将校准结晶权重）</label>
-              <div className="flex flex-wrap gap-1.5">
-                {SCORES.map((s) => (
-                  <button
-                    key={s.val}
-                    onClick={() => setScore(s.val)}
-                    className={`rounded-lg border px-2.5 py-1.5 text-xs ${
-                      score === s.val
-                        ? 'border-indigo-500 bg-indigo-500/20 text-indigo-200'
-                        : 'border-slate-800 bg-slate-950 text-slate-400'
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
+    <Modal
+      open={!!action}
+      onClose={onClose}
+      maxWidth="sm:max-w-md"
+      title="知行审计：提交真实反馈"
+      icon={
+        <IconBadge tone="leaf">
+          <ClipboardCheck className="h-5 w-5" />
+        </IconBadge>
+      }
+    >
+      {view && (
+        <>
+          <div className="flex-1 space-y-5 overflow-y-auto p-5 text-sm">
+            <div className="well space-y-1.5 p-4">
+              <div className="flex items-start gap-2 font-bold text-ink">
+                <Zap className="mt-0.5 h-4 w-4 shrink-0 text-leaf-600" />
+                <span>微行动：{view.micro_action}</span>
+              </div>
+              <div className="pl-6 text-ink-muted">
+                <span className="chip chip-sun mr-1.5">If</span>
+                触发条件：{view.trigger_condition}
               </div>
             </div>
-          )}
 
-          <div>
-            <label className="mb-1.5 block text-xs text-slate-400">阻力标签</label>
-            <select
-              value={friction}
-              onChange={(e) => setFriction(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100"
-            >
-              {FRICTIONS.map((f) => (
-                <option key={f.val} value={f.val}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-1.5 block text-xs text-slate-400">一句话复盘（可选）</label>
-            <textarea
-              rows={2}
-              value={reflection}
-              onChange={(e) => setReflection(e.target.value)}
-              placeholder="实际发生了什么？这个认知边界准确吗？"
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none focus:border-indigo-500"
+            <Segmented
+              group="audit-executed"
+              value={executed ? 'yes' : 'no'}
+              onChange={(v) => setExecuted(v === 'yes')}
+              className="flex w-full [&>button]:flex-1 [&>button]:justify-center [&>button]:!py-2"
+              options={[
+                {
+                  value: 'yes',
+                  label: (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 text-leaf-600" />
+                      已实际执行
+                    </>
+                  ),
+                  activeClass: '!bg-leaf-50 ring-1 ring-leaf-200',
+                },
+                {
+                  value: 'no',
+                  label: '未执行 / 放弃',
+                  activeClass: '!bg-sun-50 ring-1 ring-sun-200',
+                },
+              ]}
             />
-          </div>
-        </div>
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-xl px-4 py-2 text-xs text-slate-400 hover:bg-slate-800">
-            取消
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {submitting ? '校准中...' : '提交并回写权重'}
-          </button>
-        </div>
-      </div>
-    </div>
+            <AnimatePresence initial={false}>
+              {executed && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <label className="label">现实结果打分（将校准结晶权重）</label>
+                  <div className="flex flex-wrap gap-2">
+                    {SCORES.map((s) => {
+                      const active = score === s.val;
+                      return (
+                        <motion.button
+                          key={s.val}
+                          onClick={() => setScore(s.val)}
+                          whileTap={{ scale: 0.94 }}
+                          animate={active ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+                          transition={{ duration: 0.25 }}
+                          className={`rounded-xl border-2 px-3 py-1.5 text-sm font-bold transition-colors ${
+                            active
+                              ? SCORE_TONE[s.val]
+                              : 'border-line bg-surface text-ink-muted hover:border-line-strong hover:text-ink'
+                          }`}
+                        >
+                          {s.label}
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div>
+              <label className="label">阻力标签</label>
+              <select value={friction} onChange={(e) => setFriction(e.target.value)} className="input">
+                {FRICTIONS.map((f) => (
+                  <option key={f.val} value={f.val}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label">一句话复盘（可选）</label>
+              <textarea
+                rows={2}
+                value={reflection}
+                onChange={(e) => setReflection(e.target.value)}
+                placeholder="实际发生了什么？这个认知边界准确吗？"
+                className="input resize-y"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-line px-5 py-4">
+            <button onClick={onClose} className="btn btn-ghost">
+              取消
+            </button>
+            <button onClick={handleSubmit} disabled={submitting} className="btn btn-primary btn-press">
+              {submitting ? '校准中...' : '提交并回写权重'}
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
